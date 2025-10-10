@@ -1,0 +1,44 @@
+{
+  "name": "assumed",
+  "version": "1.0.0",
+  "description": "Typescript fast & easy asserts",
+  "main": "dist/assumed.js",
+  "types": "dist/assumed.d.ts",
+  "scripts": {
+    "build": "tsc"
+  }
+  "exports": {
+    ".": {
+      "import": "./dist/assumed.js",
+      "require": "./dist/assumed.js",
+      "types": "./dist/assumed.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "assert",
+    "check",
+    "javascript",
+    "typescript"
+  ],
+  "homepage": "https://github.com/Luukvdh/assumed#readme",
+  "bugs": {
+    "url": "https://github.com/Luukvdh/assumed/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Luukvdh/assumed.git"
+  },
+  "license": "ISC",
+  "author": "Luuk van den Hoogen",
+  "type": "es2020",
+  "main": "assumed.js",
+  "scripts": {
+    "test": "Assuming(5 == 5 && 'words' typeof 'string').Run(()=>console.log('that is both correct!');"
+  }
+}
+
+
+
