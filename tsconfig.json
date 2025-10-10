@@ -3,11 +3,14 @@
     "declaration": true,
     "declarationMap": true,
     "outDir": "./dist",
+    "rootDir": "./src",
     "moduleResolution": "node",
     "target": "ESNext",
     "module": "ESNext",
     "esModuleInterop": true,
     "strict": true
   },
-  "include": ["modules", "assumed.ts"]
+  "include": [
+    "src/**/*.ts"
+  ]
 }
