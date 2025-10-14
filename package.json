@@ -1,9 +1,9 @@
 {
   "name": "assumed",
-  "version": "1.6.3",
+  "version": "1.6.4",
   "description": "Typescript fast & easy asserts",
   "main": "./dist/assume.js",
-  "types": ".dist/assume.d.ts",
+  "types": "./dist/assume.d.ts",
   "exports": {
     ".": {
       "import": "./dist/assume.js",
