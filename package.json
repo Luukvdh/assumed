@@ -1,6 +1,6 @@
 {
   "name": "assumed",
-  "version": "1.6.4",
+  "version": "1.6.5",
   "description": "Typescript fast & easy asserts",
   "main": "./dist/assume.js",
   "types": "./dist/assume.d.ts",
@@ -12,7 +12,9 @@
     }
   },
   "files": [
-    "dist"
+	"dist/assume.js",
+	"src/assume.d.ts",
+	"src/assume.ts"
   ],
   "keywords": [
     "assert",
@@ -33,7 +35,4 @@
   "scripts": {
     "build": "tsc"
   },
-  "dependencies": {
-    "assumed": "^1.4.2"
-  }
 }

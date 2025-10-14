@@ -111,16 +111,20 @@ export function assuming(...args) {
                 const m = buildMessage(msg);
                 throw error instanceof Error ? error : new Error(m);
             }
+            return true;
         },
         isFalse(msg) {
             if (!failed)
                 throw new Error(msg ?? "Expected assumptions to be refuted");
+            return true;
         },
         // Boolean probes
-        wasCorrect() {
+        isVindicated() {
+            //alias
             return !failed;
         },
-        wasWrong() {
+        isRefuted() {
+            //alias
             return failed;
         },
         // Fluent failure handler
@@ -163,29 +167,25 @@ export function assuming(...args) {
     return api;
 }
 // Boolean convenience: true if fn does not throw
-export function check(fn) {
+export function check(Fn) {
     try {
         return assuming(() => {
-            fn();
+            Fn();
             return true;
-        }, { quiet: true }).wasCorrect();
+        }, { quiet: true }).isVindicated();
     }
     catch {
         return false;
     }
 }
 export const CoreChecks = {
-    that(cond, msg) {
-        if (!cond)
-            throw new Error(msg ?? "(assumption failed)");
-    },
-    isTrue(cond, msg) {
-        if (!cond)
-            throw new Error(msg ?? "(assumption failed: expected true)");
-    },
-    isFalse(cond, msg) {
+    assumeFalse(cond, msg) {
         if (cond)
             throw new Error(msg ?? "(assumption failed: expected false)");
+    },
+    assumeTrue(cond, msg) {
+        if (!cond)
+            throw new Error(msg ?? "(assumption failed: expected true)");
     },
     isFunction(v, msg) {
         if (typeof v !== "function")
@@ -213,16 +213,35 @@ export const CoreChecks = {
         if (v != null)
             throw new Error(msg ?? "Expected value to be null or undefined");
     },
-    isPresent(v, msg) {
+    notNil(v, msg) {
         // neither null nor undefined
-        if (v == null)
+        if (typeof v === "undefined" || v === null)
             throw new Error(msg ?? "Expected value to be present");
+    },
+    notNullOrUndefined(v, msg) {
+        // neither null nor undefined
+        return this.notNil(v, msg);
+    },
+    notUndefined(v, msg) {
+        if (v === undefined)
+            throw new Error(msg ?? "Expected value to be present");
+    },
+    notNull(v, msg) {
+        if (v === null)
+            throw new Error(msg ?? "Expected value to be present");
+    },
+    isTrue: function (cond, msg) {
+        throw new Error("Function not implemented.");
+    },
+    isFalse: function (cond, msg) {
+        throw new Error("Function not implemented.");
     },
 };
 export const ObjectChecks = {
     isObject(v, msg) {
         if (typeof v !== "object" || v === null || Array.isArray(v))
             throw new Error(msg ?? "Expected object");
+        assertNotNil(v);
         assertIsObject(v);
     },
     hasKey(obj, key, msg) {
@@ -230,9 +249,14 @@ export const ObjectChecks = {
             throw new Error(msg ?? `Expected object with key "${key}"`);
     },
     hasKeys(obj, ...keys) {
-        for (const key of keys)
+        if (typeof obj !== "object" || obj === null)
+            throw new Error("Expected object");
+        for (const key of keys) {
             if (!(key in obj))
                 throw new Error(`Expected object with key "${key}"`);
+            return true;
+        }
+        return true;
     },
     equalStringified(obj, expected) {
         if (JSON.stringify(obj) !== expected)
@@ -279,6 +303,7 @@ export const ObjectChecks = {
 };
 export const ArrayChecks = {
     isArray(v, msg) {
+        assertNotNil(v);
         if (!Array.isArray(v))
             throw new Error(msg ?? "Expected array");
     },
@@ -376,22 +401,63 @@ function getTypeName(val) {
 }
 function createAssumption(value) {
     const queue = [];
+    pushAssumeEvent({
+        t: Date.now(),
+        kind: "start",
+        info: { valuePreview: previewValue(value) },
+    });
     const runAll = () => {
         for (const c of queue)
-            c();
+            c.check();
+        pushAssumeEvent({ t: Date.now(), kind: "vindicated" });
         return true;
     };
     const runner = function () {
         return runAll();
     };
-    const add = (fn) => {
-        queue.push(fn);
+    // NOTE: add now wraps thrown errors into AssumptionError and logs history
+    const add = (fn, type = "unknown", op) => {
+        const wrapped = () => {
+            try {
+                fn();
+                pushAssumeEvent({ t: Date.now(), kind: "check", info: { type, op } });
+            }
+            catch (e) {
+                if (isAssumptionError(e)) {
+                    pushAssumeEvent({
+                        t: Date.now(),
+                        kind: "refuted",
+                        info: { message: e.message },
+                    });
+                    throw e;
+                }
+                const err = new AssumptionError(e instanceof Error ? e.message : String(e), {
+                    stack: queue.slice(),
+                    value,
+                    cause: e,
+                });
+                pushAssumeEvent({
+                    t: Date.now(),
+                    kind: "refuted",
+                    info: { message: err.message },
+                });
+                throw err;
+            }
+        };
+        queue.push({ check: wrapped, type });
     };
     const base = {
         that(predicate, msg) {
             add(() => {
                 if (!predicate(value))
                     throw new Error(msg ?? "Assumption failed");
+            });
+            return runner;
+        },
+        instanceof(expected, msg) {
+            add(() => {
+                if (!(value instanceof expected))
+                    throw new Error(msg ?? "Assumption failed: value is not instance of expected");
             });
             return runner;
         },
@@ -402,7 +468,7 @@ function createAssumption(value) {
             });
             return runner;
         },
-        run() {
+        toBoolean() {
             return runAll();
         },
         value() {
@@ -410,276 +476,516 @@ function createAssumption(value) {
         },
     };
     Object.assign(runner, base);
-    const toNumberChain = () => {
-        const addNum = (fn) => add(() => fn(value));
-        const num = {
-            ...base,
-            greaterThan(n, msg) {
-                addNum((v) => {
-                    if (!(v > n))
-                        throw new Error(msg ?? `Expected > ${n}`);
-                });
-                return runner;
-            },
-            greaterOrEqual(n, msg) {
-                addNum((v) => {
-                    if (!(v >= n))
-                        throw new Error(msg ?? `Expected >= ${n}`);
-                });
-                return runner;
-            },
-            lessThan(n, msg) {
-                addNum((v) => {
-                    if (!(v < n))
-                        throw new Error(msg ?? `Expected < ${n}`);
-                });
-                return runner;
-            },
-            lessOrEqual(n, msg) {
-                addNum((v) => {
-                    if (!(v <= n))
-                        throw new Error(msg ?? `Expected <= ${n}`);
-                });
-                return runner;
-            },
-            between(min, max, msg) {
-                addNum((v) => {
-                    if (!(v >= min && v <= max))
-                        throw new Error(msg ?? `Expected between ${min} and ${max}`);
-                });
-                return runner;
-            },
-        };
-        return Object.assign(runner, num);
-    };
-    const toElementChain = () => {
-        const addEl = (fn) => add(() => fn(value));
-        const el = {
-            ...base,
-            hasChildren(msg) {
-                addEl((e) => {
-                    if (typeof Element === "undefined" || !(e instanceof Element))
-                        throw new Error("Expected Element");
-                    if (e.childElementCount === 0)
-                        throw new Error(msg ?? "Expected element to have at least one child element");
-                });
-                return runner;
-            },
-            hasChild(msg) {
-                return runner.hasChildren(msg);
-            },
-            hasChildMatching(selector, msg) {
-                addEl((e) => {
-                    if (typeof Element === "undefined" || !(e instanceof Element))
-                        throw new Error("Expected Element");
-                    if (!e.querySelector(selector))
-                        throw new Error(msg ?? `Expected child matching selector "${selector}"`);
-                });
-                return runner;
-            },
-            hasDescendant(selector, msg) {
-                addEl((e) => {
-                    if (typeof Element === "undefined" || !(e instanceof Element))
-                        throw new Error("Expected Element");
-                    if (!e.querySelector(selector))
-                        throw new Error(msg ?? `Expected descendant matching selector "${selector}"`);
-                });
-                return runner;
-            },
-            hasAttribute(name, msg) {
-                addEl((e) => {
-                    if (typeof Element === "undefined" || !(e instanceof Element))
-                        throw new Error("Expected Element");
-                    if (!e.hasAttribute(name))
-                        throw new Error(msg ?? `Expected attribute "${name}"`);
-                });
-                return runner;
-            },
-            attributeEquals(name, expected, msg) {
-                addEl((e) => {
-                    if (typeof Element === "undefined" || !(e instanceof Element))
-                        throw new Error("Expected Element");
-                    if (e.getAttribute(name) !== expected)
-                        throw new Error(msg ?? `Expected attribute "${name}" to equal "${expected}"`);
-                });
-                return runner;
-            },
-        };
-        return Object.assign(runner, el);
-    };
-    const toArrayChain = () => {
-        const addArr = (fn) => add(() => fn(value));
-        const arr = {
-            ...base,
-            hasLength(len, msg) {
-                addArr((a) => {
-                    if (a.length !== len)
-                        throw new Error(msg ?? `Expected array length ${len}`);
-                });
-                return runner;
-            },
-            notEmpty(msg) {
-                addArr((a) => {
-                    if (a.length === 0)
-                        throw new Error(msg ?? "Expected non-empty array");
-                });
-                return runner;
-            },
-            itemIsBoolean(index, msg) {
-                addArr((a) => {
-                    if (typeof a[index] !== "boolean")
-                        throw new Error(msg ?? `Expected boolean at index ${index}`);
-                });
-                return runner;
-            },
-            itemIsString(index, msg) {
-                addArr((a) => {
-                    if (typeof a[index] !== "string")
-                        throw new Error(msg ?? `Expected string at index ${index}`);
-                });
-                return runner;
-            },
-            itemIsNumber(index, msg) {
-                addArr((a) => {
-                    if (typeof a[index] !== "number")
-                        throw new Error(msg ?? `Expected number at index ${index}`);
-                });
-                return runner;
-            },
-            itemIsObject(index, msg) {
-                addArr((a) => {
-                    const v = a[index];
-                    if (typeof v !== "object" || v === null || Array.isArray(v))
-                        throw new Error(msg ?? `Expected object at index ${index}`);
-                });
-                return runner;
-            },
-        };
-        return Object.assign(runner, arr);
-    };
-    // ADD: toStringChain
-    const toStringChain = () => {
-        const addStr = (fn) => add(() => fn(String(value)));
-        const str = {
-            ...base,
-            notEmpty(msg) {
-                addStr((s) => {
-                    if (s.length === 0)
-                        throw new Error(msg ?? "Expected non-empty string");
-                });
-                return runner;
-            },
-            hasLength(len, msg) {
-                addStr((s) => {
-                    if (s.length !== len)
-                        throw new Error(msg ?? `Expected length ${len}`);
-                });
-                return runner;
-            },
-            minLength(n, msg) {
-                addStr((s) => {
-                    if (s.length < n)
-                        throw new Error(msg ?? `Expected length >= ${n}`);
-                });
-                return runner;
-            },
-            maxLength(n, msg) {
-                addStr((s) => {
-                    if (s.length > n)
-                        throw new Error(msg ?? `Expected length <= ${n}`);
-                });
-                return runner;
-            },
-            lengthBetween(min, max, msg) {
-                addStr((s) => {
-                    if (s.length < min || s.length > max)
-                        throw new Error(msg ?? `Expected length between ${min} and ${max}`);
-                });
-                return runner;
-            },
-            contains(needle, msg) {
-                addStr((s) => {
-                    const ok = typeof needle === "string" ? s.includes(needle) : needle.test(s);
-                    if (!ok)
-                        throw new Error(msg ?? `Expected string to contain ${String(needle)}`);
-                });
-                return runner;
-            },
-            startsWith(prefix, msg) {
-                addStr((s) => {
-                    if (!s.startsWith(prefix))
-                        throw new Error(msg ?? `Expected to start with "${prefix}"`);
-                });
-                return runner;
-            },
-            endsWith(suffix, msg) {
-                addStr((s) => {
-                    if (!s.endsWith(suffix))
-                        throw new Error(msg ?? `Expected to end with "${suffix}"`);
-                });
-                return runner;
-            },
-            matches(re, msg) {
-                addStr((s) => {
-                    if (!re.test(s))
-                        throw new Error(msg ?? `Expected to match ${re}`);
-                });
-                return runner;
-            },
-            equalsIgnoreCase(expected, msg) {
-                addStr((s) => {
-                    if (s.toLowerCase() !== expected.toLowerCase())
-                        throw new Error(msg ?? `Expected "${expected}" (case-insensitive)`);
-                });
-                return runner;
-            },
-            includesAny(...needles) {
-                addStr((s) => {
-                    if (!needles.some((n) => s.includes(n)))
-                        throw new Error(`Expected to include any of [${needles.join(", ")}]`);
-                });
-                return runner;
-            },
-            includesAll(...needles) {
-                addStr((s) => {
-                    if (!needles.every((n) => s.includes(n)))
-                        throw new Error(`Expected to include all of [${needles.join(", ")}]`);
-                });
-                return runner;
-            },
-            isJSON(msg) {
-                addStr((s) => {
-                    try {
-                        JSON.parse(s);
+    // Adapt existing chain builders to return new generic form
+    const toNumberChain = () => Object.assign(runner, {
+        greaterThan(n, msg) {
+            add(() => {
+                if (!(value > n))
+                    throw new Error(msg ?? `Expected > ${n}`);
+            }, "number");
+            return runner;
+        },
+        greaterOrEqual(n, msg) {
+            add(() => {
+                if (!(value >= n))
+                    throw new Error(msg ?? `Expected >= ${n}`);
+            }, "number");
+            return runner;
+        },
+        lessThan(n, msg) {
+            add(() => {
+                if (!(value < n))
+                    throw new Error(msg ?? `Expected < ${n}`);
+            }, "number");
+            return runner;
+        },
+        lessOrEqual(n, msg) {
+            add(() => {
+                if (!(value <= n))
+                    throw new Error(msg ?? `Expected <= ${n}`);
+            }, "number");
+            return runner;
+        },
+        between(min, max, msg) {
+            add(() => {
+                const v = value;
+                if (!(v >= min && v <= max))
+                    throw new Error(msg ?? `Expected between ${min} and ${max}`);
+            }, "number");
+            return runner;
+        },
+    });
+    const toStringChain = () => Object.assign(runner, {
+        notEmpty(msg) {
+            add(() => {
+                if (String(value).length === 0)
+                    throw new Error(msg ?? "Expected non-empty string");
+            }, "string");
+            return runner;
+        },
+        hasLength(len, msg) {
+            add(() => {
+                if (String(value).length !== len)
+                    throw new Error(msg ?? `Expected length ${len}`);
+            }, "string");
+            return runner;
+        },
+        minLength(n, msg) {
+            add(() => {
+                if (String(value).length < n)
+                    throw new Error(msg ?? `Expected length >= ${n}`);
+            }, "string");
+            return runner;
+        },
+        maxLength(n, msg) {
+            add(() => {
+                if (String(value).length > n)
+                    throw new Error(msg ?? `Expected length <= ${n}`);
+            }, "string");
+            return runner;
+        },
+        lengthBetween(min, max, msg) {
+            add(() => {
+                const l = String(value).length;
+                if (l < min || l > max)
+                    throw new Error(msg ?? `Expected length between ${min} and ${max}`);
+            }, "string");
+            return runner;
+        },
+        contains(needle, msg) {
+            add(() => {
+                const s = String(value);
+                const ok = typeof needle === "string" ? s.includes(needle) : needle.test(s);
+                if (!ok)
+                    throw new Error(msg ?? `Expected to contain ${String(needle)}`);
+            }, "string");
+            return runner;
+        },
+        startsWith(prefix, msg) {
+            add(() => {
+                if (!String(value).startsWith(prefix))
+                    throw new Error(msg ?? `Expected to start with "${prefix}"`);
+            }, "string");
+            return runner;
+        },
+        endsWith(suffix, msg) {
+            add(() => {
+                if (!String(value).endsWith(suffix))
+                    throw new Error(msg ?? `Expected to end with "${suffix}"`);
+            }, "string");
+            return runner;
+        },
+        matches(re, msg) {
+            add(() => {
+                if (!re.test(String(value)))
+                    throw new Error(msg ?? `Expected to match ${re}`);
+            }, "string");
+            return runner;
+        },
+        equalsIgnoreCase(expected, msg) {
+            add(() => {
+                if (String(value).toLowerCase() !== expected.toLowerCase())
+                    throw new Error(msg ?? `Expected "${expected}" (case-insensitive)`);
+            }, "string");
+            return runner;
+        },
+        includesAny(...needles) {
+            add(() => {
+                const s = String(value);
+                if (!needles.some((n) => s.includes(n)))
+                    throw new Error(`Expected any of [${needles.join(", ")}]`);
+            }, "string");
+            return runner;
+        },
+        includesAll(...needles) {
+            add(() => {
+                const s = String(value);
+                if (!needles.every((n) => s.includes(n)))
+                    throw new Error(`Expected all of [${needles.join(", ")}]`);
+            }, "string");
+            return runner;
+        },
+        isJSON(msg) {
+            add(() => {
+                try {
+                    JSON.parse(String(value));
+                }
+                catch {
+                    throw new Error(msg ?? "Expected valid JSON");
+                }
+            }, "string");
+            return runner;
+        },
+    });
+    const toArrayChain = () => Object.assign(runner, {
+        hasLength(len, msg) {
+            add(() => {
+                if (value.length !== len)
+                    throw new Error(msg ?? `Expected array length ${len}`);
+            }, "array");
+            return runner;
+        },
+        notEmpty(msg) {
+            add(() => {
+                if (value.length === 0)
+                    throw new Error(msg ?? "Expected non-empty array");
+            }, "array");
+            return runner;
+        },
+        itemIsBoolean(i, msg) {
+            add(() => {
+                if (typeof value[i] !== "boolean")
+                    throw new Error(msg ?? `Expected boolean at ${i}`);
+            }, "array");
+            return runner;
+        },
+        itemIsString(i, msg) {
+            add(() => {
+                if (typeof value[i] !== "string")
+                    throw new Error(msg ?? `Expected string at ${i}`);
+            }, "array");
+            return runner;
+        },
+        itemIsNumber(i, msg) {
+            add(() => {
+                if (typeof value[i] !== "number")
+                    throw new Error(msg ?? `Expected number at ${i}`);
+            }, "array");
+            return runner;
+        },
+        itemIsObject(i, msg) {
+            add(() => {
+                const v = value[i];
+                if (typeof v !== "object" || v === null || Array.isArray(v))
+                    throw new Error(msg ?? `Expected object at ${i}`);
+            }, "array");
+            return runner;
+        },
+        includesString(needle, msg) {
+            add(() => {
+                if (!value.some((item) => String(item).includes(needle)))
+                    throw new Error(msg ?? `Expected string including "${needle}"`);
+            }, "array");
+            return runner;
+        },
+        includesNumber(needle, msg) {
+            add(() => {
+                if (!value.some((item) => item === needle))
+                    throw new Error(msg ?? `Expected number including "${needle}"`);
+            }, "array");
+            return runner;
+        },
+        includesObject(needle, msg) {
+            add(() => {
+                if (!value.some((item) => JSON.stringify(item) === JSON.stringify(needle)))
+                    throw new Error(msg ?? `Expected object including "${JSON.stringify(needle)}"`);
+            }, "array");
+            return runner;
+        },
+        onlyHasObjects(msg) {
+            add(() => {
+                if (!value.every((item) => typeof item === "object" &&
+                    item !== null &&
+                    !Array.isArray(item)))
+                    throw new Error(msg ?? "Expected all objects");
+            }, "array");
+            return runner;
+        },
+        onlyHasStrings(msg) {
+            add(() => {
+                if (!value.every((item) => typeof item === "string"))
+                    throw new Error(msg ?? "Expected all strings");
+            }, "array");
+            return runner;
+        },
+        onlyHasNumbers(msg) {
+            add(() => {
+                if (!value.every((item) => typeof item === "number"))
+                    throw new Error(msg ?? "Expected all numbers");
+            }, "array");
+            return runner;
+        },
+        everyIsFalsy(msg) {
+            add(() => {
+                if (!value.every((item) => !item))
+                    throw new Error(msg ?? "Expected all falsy");
+            }, "array");
+            return runner;
+        },
+        everyIsTruthy(msg) {
+            add(() => {
+                if (!value.every((item) => !!item))
+                    throw new Error(msg ?? "Expected all truthy");
+            }, "array");
+            return runner;
+        },
+        includesCondition(needle, msg) {
+            add(() => {
+                if (!value.some(needle))
+                    throw new Error(msg ?? "Expected array to include condition");
+            }, "array");
+            return runner;
+        },
+    });
+    const toObjectChain = () => Object.assign(runner, {
+        hasKey(key, msg) {
+            add(() => {
+                if (!(key in value))
+                    throw new Error(msg ?? `Expected key "${key}"`);
+            }, "object");
+            return runner;
+        },
+        hasKeys(...keys) {
+            add(() => {
+                for (const k of keys)
+                    if (!(k in value))
+                        throw new Error(`Expected key "${k}"`);
+            }, "object");
+            return runner;
+        },
+        keyEquals(key, expected, msg) {
+            add(() => {
+                if (value[key] !== expected)
+                    throw new Error(msg ?? `Expected ${key} === ${String(expected)}`);
+            }, "object");
+            return runner;
+        },
+        sameKeys(expected, msg) {
+            add(() => {
+                const a = Object.keys(value);
+                const b = Object.keys(expected);
+                if (a.length !== b.length)
+                    throw new Error(msg ?? "Key count mismatch");
+                for (const k of b)
+                    if (!(k in value))
+                        throw new Error(msg ?? `Missing key "${k}"`);
+            }, "object");
+            return runner;
+        },
+        allKeysFalsy(msg) {
+            add(() => {
+                for (const k in value)
+                    if (value[k])
+                        throw new Error(msg ?? `Key "${k}" not falsy`);
+            }, "object");
+            return runner;
+        },
+        allKeysSet(msg) {
+            add(() => {
+                for (const k in value)
+                    if (value[k] === undefined)
+                        throw new Error(msg ?? `Key "${k}" unset`);
+            }, "object");
+            return runner;
+        },
+        anyKeyNull(msg) {
+            add(() => {
+                let f = false;
+                for (const k in value)
+                    if (value[k] === null) {
+                        f = true;
+                        break;
                     }
-                    catch {
-                        throw new Error(msg ?? "Expected valid JSON");
-                    }
-                });
-                return runner;
-            },
-        };
-        return Object.assign(runner, str);
+                if (!f)
+                    throw new Error(msg ?? "No null key");
+            }, "object");
+            return runner;
+        },
+    });
+    const toElementChain = () => Object.assign(runner, {
+        hasChildren(msg) {
+            add(() => {
+                const e = value;
+                if (typeof Element === "undefined" ||
+                    !(e instanceof Element) ||
+                    e.childElementCount === 0)
+                    throw new Error(msg ?? "Expected child elements");
+            }, "element");
+            return runner;
+        },
+        hasChild(msg) {
+            return runner.hasChildren(msg);
+        },
+        hasChildMatching(sel, msg) {
+            add(() => {
+                const e = value;
+                if (typeof Element === "undefined" ||
+                    !(e instanceof Element) ||
+                    !e.querySelector(sel))
+                    throw new Error(msg ?? `Missing child "${sel}"`);
+            }, "element");
+            return runner;
+        },
+        hasDescendant(sel, msg) {
+            add(() => {
+                const e = value;
+                if (typeof Element === "undefined" ||
+                    !(e instanceof Element) ||
+                    !e.querySelector(sel))
+                    throw new Error(msg ?? `Missing descendant "${sel}"`);
+            }, "element");
+            return runner;
+        },
+        hasAttribute(name, msg) {
+            add(() => {
+                const e = value;
+                if (typeof Element === "undefined" ||
+                    !(e instanceof Element) ||
+                    !e.hasAttribute(name))
+                    throw new Error(msg ?? `Missing attribute "${name}"`);
+            }, "element");
+            return runner;
+        },
+        attributeEquals(name, expected, msg) {
+            add(() => {
+                const e = value;
+                if (typeof Element === "undefined" ||
+                    !(e instanceof Element) ||
+                    e.getAttribute(name) !== expected)
+                    throw new Error(msg ?? `Attr "${name}" != "${expected}"`);
+            }, "element");
+            return runner;
+        },
+    });
+    // Type guards (only on unknown)
+    runner.isNumber = (msg) => {
+        add(() => {
+            if (typeof value !== "number")
+                throw new Error(msg ?? "Expected number");
+        }, "number");
+        return toNumberChain();
     };
-    // Type guards
     runner.isString = (msg) => {
         add(() => {
             if (typeof value !== "string")
                 throw new Error(msg ?? "Expected string");
-        });
-        return toStringChain(); // CHANGED
+        }, "string");
+        return toStringChain();
+    };
+    runner.isArray = (msg) => {
+        add(() => {
+            if (!Array.isArray(value))
+                throw new Error(msg ?? "Expected array");
+        }, "array");
+        return toArrayChain();
+    };
+    runner.isObject = (msg) => {
+        add(() => {
+            if (typeof value !== "object" || value === null || Array.isArray(value))
+                throw new Error(msg ?? "Expected object");
+        }, "object");
+        return toObjectChain();
+    };
+    runner.isElement = (msg) => {
+        add(() => {
+            if (typeof Element === "undefined" ||
+                !(value instanceof Element))
+                throw new Error(msg ?? "Expected Element");
+        }, "element");
+        return toElementChain();
+    };
+    runner.isBoolean = (msg) => {
+        add(() => {
+            if (typeof value !== "boolean")
+                throw new Error(msg ?? "Expected boolean");
+        }, "boolean");
+        return runner;
+    };
+    runner.isNumber = (msg) => {
+        add(() => {
+            if (typeof value !== "number")
+                throw new Error(msg ?? "Expected number");
+        }, "number");
+        return toNumberChain();
+    };
+    runner.isString = (msg) => {
+        add(() => {
+            if (typeof value !== "string")
+                throw new Error(msg ?? "Expected string");
+        }, "string");
+        return toStringChain();
+    };
+    runner.isArray = (msg) => {
+        add(() => {
+            if (!Array.isArray(value))
+                throw new Error(msg ?? "Expected array");
+        }, "array");
+        return toArrayChain();
+    };
+    runner.isObject = (msg) => {
+        add(() => {
+            if (typeof value !== "object" || value === null || Array.isArray(value))
+                throw new Error(msg ?? "Expected object");
+        }, "object");
+        return toObjectChain();
+    };
+    runner.isElement = (msg) => {
+        add(() => {
+            if (typeof Element === "undefined" ||
+                !(value instanceof Element))
+                throw new Error(msg ?? "Expected Element");
+        }, "element");
+        return toElementChain();
+    };
+    runner.isBoolean = (msg) => {
+        add(() => {
+            if (typeof value !== "boolean")
+                throw new Error(msg ?? "Expected boolean");
+        }, "boolean");
+        return runner;
+    };
+    // Nullish guards producing terminal states
+    runner.isNull = (msg) => {
+        add(() => {
+            if (value !== null)
+                throw new Error(msg ?? "Expected null");
+        }, "null");
+        return runner;
+    };
+    runner.isUndefined = (msg) => {
+        add(() => {
+            if (value !== undefined)
+                throw new Error(msg ?? "Expected undefined");
+        }, "undefined");
+        return runner;
+    };
+    // Non‑nullish guards that KEEP other type guards (move to 'present')
+    runner.notNil = (msg) => {
+        add(() => {
+            if (value === null || value === undefined)
+                throw new Error(msg ?? "Expected value (not null/undefined)");
+        }, "present");
+        return runner;
+    };
+    runner.notNull = (msg) => {
+        add(() => {
+            if (value === null)
+                throw new Error(msg ?? "Expected not null");
+        }, "unknown");
+        return runner;
+    };
+    runner.notNullOrUndefined = (msg) => {
+        add(() => {
+            if (value === null || value === undefined)
+                throw new Error(msg ?? "Expected value (not null/undefined)");
+        }, "unknown");
+        return runner;
     };
     return runner;
 }
 // Exported entry
-export function assume(value) {
+export function that(value) {
     return createAssumption(value);
 }
-export function that(value) {
+export function assume(value) {
     return createAssumption(value);
 }
 export function assertIsString(v, msg) {
     assume(v).isString(msg)();
+}
+export function assertNotNil(v, msg) {
+    if (v === undefined || v === null || typeof v === "undefined")
+        throw new Error(msg ?? "Entry is nil. Expected not null or undefined");
 }
 export function assertIsObject(v, msg) {
     if (typeof v !== "object" || v === null || Array.isArray(v))
@@ -691,3 +997,107 @@ export const Checks = {
     ...ArrayChecks,
     ...ElementChecks,
 };
+const ASSUME_HISTORY = [];
+let ASSUME_HISTORY_LIMIT = 200;
+function pushAssumeEvent(ev) {
+    ASSUME_HISTORY.push(ev);
+    if (ASSUME_HISTORY.length > ASSUME_HISTORY_LIMIT)
+        ASSUME_HISTORY.shift();
+}
+function previewValue(v) {
+    try {
+        if (v === null || v === undefined)
+            return String(v);
+        if (typeof v === "string")
+            return v.length > 120 ? v.slice(0, 117) + "..." : v;
+        if (typeof v === "number" || typeof v === "boolean")
+            return String(v);
+        if (Array.isArray(v))
+            return `Array(${v.length})`;
+        if (typeof v === "object")
+            return `{${Object.keys(v)
+                .slice(0, 6)
+                .join(",")}${Object.keys(v).length > 6 ? ",…" : ""}}`;
+        return typeof v;
+    }
+    catch {
+        return undefined;
+    }
+}
+export class AssumptionError extends Error {
+    name = "AssumptionError";
+    assumeStack;
+    valuePreview;
+    timestamp;
+    cause;
+    constructor(message, opts) {
+        super(message);
+        Object.setPrototypeOf(this, new.target.prototype);
+        this.assumeStack = opts.stack;
+        this.valuePreview = previewValue(opts.value);
+        this.timestamp = Date.now();
+        this.cause = opts.cause;
+    }
+}
+export function isAssumptionError(err) {
+    return (!!err && typeof err === "object" && err.name === "AssumptionError");
+}
+export function getAssumeHistory() {
+    return ASSUME_HISTORY.slice();
+}
+export function clearAssumeHistory() {
+    ASSUME_HISTORY.length = 0;
+}
+export function setAssumeHistoryLimit(n) {
+    ASSUME_HISTORY_LIMIT = Math.max(0, n | 0);
+}
+function getFnName(fn) {
+    return fn.displayName || fn.name || "anonymous";
+}
+function enrichWithHandlerName(err, handler) {
+    const name = getFnName(handler);
+    if (err && typeof err === "object") {
+        try {
+            // attach meta
+            err.handlerName = name;
+            // prefix message for visibility
+            if (err.message && typeof err.message === "string") {
+                err.message = `[${name}] ${err.message}`;
+            }
+        }
+        catch {
+            /* ignore */
+        }
+    }
+    return err;
+}
+export function defRefHandler(def, log = false) {
+    return (err) => {
+        enrichWithHandlerName(err, defRefHandler);
+        if (log)
+            (typeof log === "function" ? log : console.error)(err);
+        return def;
+    };
+}
+export function defRefHandlerAsync(def, log = false) {
+    return async (err) => {
+        enrichWithHandlerName(err, defRefHandlerAsync);
+        if (log)
+            (typeof log === "function" ? log : console.error)(err);
+        return def;
+    };
+}
+export function assumedRoute(onRefuted, handler) {
+    return (...args) => {
+        try {
+            const result = handler(...args);
+            if (result && typeof result.then === "function") {
+                return result.catch((e) => onRefuted(enrichWithHandlerName(e, handler), ...args));
+            }
+            return result;
+        }
+        catch (e) {
+            return onRefuted(enrichWithHandlerName(e, handler), ...args);
+        }
+    };
+}
