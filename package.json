@@ -1,7 +1,8 @@
 {
   "name": "assumed",
-  "version": "1.6.5",
+  "version": "1.6.6",
   "description": "Typescript fast & easy asserts",
+  "type": "module",
   "main": "./dist/assume.js",
   "types": "./dist/assume.d.ts",
   "exports": {
@@ -12,9 +13,9 @@
     }
   },
   "files": [
-	"dist/assume.js",
-	"src/assume.d.ts",
-	"src/assume.ts"
+    "dist/assume.js",
+    "dist/assume.d.ts",
+    "src/assume.ts"
   ],
   "keywords": [
     "assert",
@@ -34,5 +35,5 @@
   "author": "Luuk van den Hoogen",
   "scripts": {
     "build": "tsc"
-  },
+  }
 }
