@@ -35,6 +35,7 @@
   "license": "ISC",
   "author": "Luuk van den Hoogen",
   "scripts": {
-    "build": "tsc"
+    "build": "tsc",
+    "clean": "rimraf dist public/js"
   }
 }

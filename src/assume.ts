@@ -9,6 +9,7 @@ type TypeTag =
   | "array"
   | "object"
   | "element"
+  | "datetime"
   | "boolean"
   | "null"
   | "undefined"
@@ -20,6 +21,7 @@ const typeTagArray = [
   "array",
   "object",
   "element",
+  "datetime",
   "boolean",
   "null",
   "undefined",
@@ -66,6 +68,7 @@ type GuardMethods<T, K extends TypeTag> = K extends "unknown"
       isArray(msg?: string): AssumptionFn<unknown[], "array">;
       isObject(msg?: string): AssumptionFn<Record<string, unknown>, "object">;
       isElement(msg?: string): AssumptionFn<any, "element">;
+      isDate(msg?: string): AssumptionFn<Date, "datetime">;
       isBoolean(msg?: string): AssumptionFn<boolean, "boolean">;
       isNull(msg?: string): AssumptionFn<null, "null">;
       isUndefined(msg?: string): AssumptionFn<undefined, "undefined">;
@@ -100,10 +103,7 @@ type DetectTypeTag<T> = T extends string
 
 interface BaseChain<T, K extends TypeTag> {
   that(predicate: (v: T) => boolean, msg?: string): AssumptionFn<T, K>;
-  equals(
-    expected: Exclude<T, null | undefined | unknown>,
-    msg?: string
-  ): AssumptionFn<T, K>;
+  equals(expected: T, msg?: string): AssumptionFn<T, K>;
 
   // Enhanced instanceof with proper narrowing:
   instanceof(
@@ -112,6 +112,8 @@ interface BaseChain<T, K extends TypeTag> {
   ): AssumptionFn<T, DetectTypeTag<T>> | AssumptionFn<T, TypeTag> | void;
 
   value(): T;
+  /** Run the queued checks and return the (narrowed) value if they pass. */
+  commit(): T;
 }
 
 // Specialized chain types
@@ -219,6 +221,22 @@ type ElementOnlyChain = {
   ): AssumptionFn<any, "element">;
 };
 
+// Date/Time specialized chain
+type DateTimeOnlyChain = {
+  /** Value is earlier than the given date/time */
+  earlier(than: Date | number, msg?: string): AssumptionFn<Date, "datetime">;
+  /** Value is later than the given date/time */
+  later(than: Date | number, msg?: string): AssumptionFn<Date, "datetime">;
+  /** Year matches the given year */
+  isYear(year: number, msg?: string): AssumptionFn<Date, "datetime">;
+  /** Value was before the given date/time (alias of earlier) */
+  wasBefore(than: Date | number, msg?: string): AssumptionFn<Date, "datetime">;
+  /** Days since the value exceeds N */
+  daysAgoExceeds(n: number, msg?: string): AssumptionFn<Date, "datetime">;
+  /** Days since the value is at least N */
+  daysSinceAtLeast(n: number, msg?: string): AssumptionFn<Date, "datetime">;
+};
+
 // Glue: Add conditional specialized chain methods depending on K
 type Specialized<T, K extends TypeTag> = K extends "number"
   ? NumberOnlyChain
@@ -230,7 +248,9 @@ type Specialized<T, K extends TypeTag> = K extends "number"
         ? ObjectOnlyChain
         : K extends "element"
           ? ElementOnlyChain
-          : {}; // other narrowed primitive kinds expose no extra methods
+          : K extends "datetime"
+            ? DateTimeOnlyChain
+            : {}; // other narrowed primitive kinds expose no extra methods
 
 export type AssumptionFn<T, K extends TypeTag = "unknown"> = (() =>
   | boolean
@@ -276,7 +296,7 @@ export class AssumingBus extends EventTarget {
       } catch {}
     }
   }
-  publicaddEventListener(
+  public addEventListener(
     type: string,
     callback: EventListenerOrEventListenerObject | null,
     options?: AddEventListenerOptions | boolean
@@ -339,13 +359,25 @@ export function assuming(
   }
 
   // normalize assumptions to callables; ignore null/undefined
+  // Also track original values from chains for eitherOr
+  const originalValues: unknown[] = [];
   const assumptions: Array<() => boolean | void> = args
     .filter(
       (a) => a != null && (typeof a === "function" || typeof a === "boolean")
     )
-    .map((a) =>
-      typeof a === "function" ? (a as () => boolean | void) : () => a as boolean
-    );
+    .map((a) => {
+      if (typeof a === "function") {
+        // Try to extract value if this is an assumption chain
+        try {
+          const value = (a as any).value?.();
+          if (value !== undefined) originalValues.push(value);
+        } catch {
+          // Ignore if value() doesn't exist
+        }
+        return a as () => boolean | void;
+      }
+      return () => a as boolean;
+    });
 
   let error: unknown;
   let failed = false;
@@ -363,11 +395,49 @@ export function assuming(
     error = e;
   }
 
-  // side-effects: surveillance events
-  assumingBus.emit(failed ? "assuming:fail" : "assuming:pass");
-  if (!failed && optionsRef.emit) {
-    assumingBus.emit(optionsRef.emit);
-  }
+  // Defer emitter logic until a terminal/return method is invoked
+  // This places emission strictly between chain evaluation and consumer observation
+  // Custom conditional emissions queued via api.emitOn(...)
+  type QueuedEmit = {
+    cond: () => boolean;
+    event: string;
+    data?: () => unknown;
+  };
+  const customEmits: QueuedEmit[] = [];
+  let __emittedBetween = false;
+  const ensureEmitted = () => {
+    if (__emittedBetween) return;
+    // Emit legacy names and new names for clarity
+    assumingBus.emit(failed ? "assuming:fail" : "assuming:pass");
+    assumingBus.emit(failed ? "assume:refuted" : "assume:vindicated");
+    if (!failed && optionsRef.emit) {
+      assumingBus.emit(optionsRef.emit);
+    }
+    // Process queued conditional emissions
+    for (const qe of customEmits) {
+      let shouldEmit = false;
+      try {
+        shouldEmit = !!qe.cond();
+      } catch (e) {
+        // Don't break overall flow if predicate throws
+        console.error("emitOn predicate threw:", e);
+      }
+      if (shouldEmit) {
+        let payload: unknown;
+        try {
+          payload = qe.data
+            ? qe.data()
+            : originalValues.length > 0
+              ? originalValues[0]
+              : undefined;
+        } catch (e) {
+          console.error("emitOn data producer threw:", e);
+        }
+        assumingBus.emit(qe.event, payload as any);
+      }
+    }
+    __emittedBetween = true;
+  };
 
   if (failed && !optionsRef.quiet) {
     const msg =
@@ -384,50 +454,169 @@ export function assuming(
     (error instanceof Error ? error.message : "Assumptions not satisfied");
 
   const api = {
+    /** Emit when pass (vindicated). Sugar for emitOn(() => !failed, event, data) */
+    emitOnPass(event: string, data?: unknown | (() => unknown)) {
+      customEmits.push({
+        cond: () => !failed,
+        event,
+        data:
+          data === undefined
+            ? () => (originalValues.length > 0 ? originalValues[0] : undefined)
+            : typeof data === "function"
+              ? (data as () => unknown)
+              : () => data,
+      });
+      return api;
+    },
+    /** Emit when fail (refuted). Sugar for emitOn(() => failed, event, data) */
+    emitOnFail(event: string, data?: unknown | (() => unknown)) {
+      customEmits.push({
+        cond: () => failed,
+        event,
+        data:
+          data === undefined
+            ? () => (originalValues.length > 0 ? originalValues[0] : undefined)
+            : typeof data === "function"
+              ? (data as () => unknown)
+              : () => data,
+      });
+      return api;
+    },
+    /**
+     * Queue a conditional emission to run between the chain and terminal actions.
+     * Usage:
+     *   assuming(...)
+     *     .emitOn(() => someCondition, "my:event", () => payload)
+     *     .Run(() => { /* ... *\/ })
+     * condition: boolean or () => boolean
+     * event: string
+     * data: unknown or () => unknown (defaults to original value from the chain)
+     */
+    emitOn(
+      condition: boolean | (() => boolean),
+      event: string,
+      data?: unknown | (() => unknown)
+    ) {
+      const condFn: () => boolean =
+        typeof condition === "function"
+          ? (condition as () => boolean)
+          : () => !!condition;
+      const dataFn: (() => unknown) | undefined =
+        data === undefined
+          ? () => (originalValues.length > 0 ? originalValues[0] : undefined)
+          : typeof data === "function"
+            ? (data as () => unknown)
+            : () => data;
+      customEmits.push({ cond: condFn, event, data: dataFn });
+      return api; // FLUENT
+    },
     Run<R>(fn: () => R) {
+      // Emit right before running user code, after chains completed
+      ensureEmitted();
       if (!failed) lastResult = fn();
       return api; // FLUENT
     },
     // Optional accessor for the value produced by last Run/result
     value<T = unknown>(): T | undefined {
+      ensureEmitted();
       return lastResult as T | undefined;
     },
     // Throwing asserts
+    /** Throws if refuted; returns true if vindicated */
     isTrue(msg?: string): boolean | never {
+      ensureEmitted();
       if (failed) {
         const m = buildMessage(msg);
         throw error instanceof Error ? error : new Error(m);
       }
       return true;
     },
+    /** Throws if vindicated; returns true if refuted */
     isFalse(msg?: string): boolean | never {
+      ensureEmitted();
       if (!failed) throw new Error(msg ?? "Expected assumptions to be refuted");
       return true;
     },
     // Boolean probes
     isVindicated(): boolean {
       //alias
+      ensureEmitted();
       return !failed;
     },
     isRefuted(): boolean {
       //alias
+      ensureEmitted();
       return failed;
     },
     // Fluent failure handler
+    /** Run only when refuted; stores return as lastResult */
     onRefuted(fn: (err?: unknown) => unknown) {
+      ensureEmitted();
       if (failed) lastResult = fn(error);
+      return api; // FLUENT
+    },
+    /** Run only when vindicated; stores return as lastResult */
+    onVindicated(fn: () => unknown) {
+      ensureEmitted();
+      if (!failed) lastResult = fn();
       return api; // FLUENT
     },
     // Promise-like alias
     catch(fn: (err: unknown) => unknown) {
+      ensureEmitted();
       if (failed) lastResult = fn(error);
       return api; // FLUENT
     },
+    /**
+     * Either/Or fork with your original value as the asserter parameter.
+     * Think: "String or Object? Red or Blue?" — write two small functions and we pass the same original value to either branch.
+     * - either(original): assumptions passed → handle as one case (e.g., string → JSON.parse)
+     * - or(original): failed without throwing → handle the alternative (e.g., already parsed → return as-is)
+     * - neither(error): failed with an error → handle exception cases
+     * Returns whatever your branch returns. Quiet mode is turned on automatically to avoid eager throws before branching.
+     */
+    eitherOr<R>(
+      either: (value: unknown) => R,
+      or?: (value: unknown) => R,
+      neither?: (err?: unknown) => R
+    ): R | undefined {
+      // Ensure no eager throwing before we branch
+      optionsRef.quiet = true; // Automatically disable eager throw for branching
+      ensureEmitted();
+
+      // Use the first original value we captured
+      const originalValue =
+        originalValues.length > 0 ? originalValues[0] : undefined;
+
+      if (!failed) {
+        // Either: assumptions passed, call with validated value
+        return (lastResult = either(originalValue));
+      }
+
+      if (or && !error) {
+        // Or: assumptions failed but didn't throw, call with original value
+        return (lastResult = or(originalValue));
+      }
+
+      if (neither) {
+        // Neither: assumptions threw error
+        return (lastResult = neither(error));
+      }
+
+      return undefined;
+    },
+
     // Branch helper (kept for convenience)
     result<R>(success: () => R, failure?: (err?: unknown) => R): R | undefined {
+      ensureEmitted();
       if (!failed) return (lastResult = success());
       if (failure) return (lastResult = failure(error));
       return undefined;
+    },
+    /** Quick status accessor for testing and telemetry */
+    status() {
+      ensureEmitted();
+      return { failed, error, lastResult } as const;
     },
     // Stateful options
     with(patch: AssumingOptions | string) {
@@ -609,6 +798,23 @@ function formatAssumptionError(err: AssumptionError): string {
 function createAssumption<T>(value: T): AssumptionFn<T, "unknown"> {
   const queue: ChainLink[] = [];
   const chainTrace: string[] = []; // Track method calls
+  // Capture where the chain was created (per-chain, not module-level)
+  const creationLocation = (() => {
+    try {
+      const stack = new Error().stack;
+      if (stack) {
+        const lines = stack.split("\n");
+        const relevantLine = lines.find(
+          (line) =>
+            line.includes("at ") &&
+            !line.includes("assume.js") &&
+            !line.includes("assume.ts")
+        );
+        return relevantLine?.trim().replace("at ", "") || "unknown";
+      }
+    } catch {}
+    return undefined;
+  })();
 
   // Capture where the chain was created
   pushAssumeEvent({
@@ -682,7 +888,7 @@ function createAssumption<T>(value: T): AssumptionFn<T, "unknown"> {
             value,
             cause: e,
             chainTrace: chainTrace.slice(),
-            captureLocation,
+            captureLocation: creationLocation,
           }
         );
 
@@ -737,6 +943,7 @@ function createAssumption<T>(value: T): AssumptionFn<T, "unknown"> {
             "unknown") as TypeTag,
           `instanceof(${expected.name || "Constructor"})`
         );
+        return runner as any;
       } else {
         // Empty instanceof - confidence check, detect current type
         add(
@@ -752,6 +959,7 @@ function createAssumption<T>(value: T): AssumptionFn<T, "unknown"> {
             "unknown") as TypeTag,
           `instanceof('base')`
         );
+        return runner as any;
       }
     },
     equals(expected: T, msg?: string) {
@@ -766,6 +974,15 @@ function createAssumption<T>(value: T): AssumptionFn<T, "unknown"> {
       return runner as any;
     },
     value() {
+      return value;
+    },
+    commit() {
+      // Execute queued checks (without throwing when we return false inside runAll)
+      // We want commit to throw on failure, so call the runner and if false, simulate failure throw.
+      const ok = runner();
+      if (!ok) {
+        throw new Error("Assumption failed on commit()");
+      }
       return value;
     },
   };
@@ -1433,6 +1650,19 @@ function createAssumption<T>(value: T): AssumptionFn<T, "unknown"> {
     return toElementChain();
   };
 
+  // Date guard and chain
+  (runner as any).isDate = (msg?: string) => {
+    add(
+      () => {
+        if (!(value instanceof Date))
+          throw new Error(msg ?? "Expected Date instance");
+      },
+      "datetime",
+      "isDate"
+    );
+    return toDateChain();
+  };
+
   (runner as any).isBoolean = (msg?: string) => {
     add(
       () => {
@@ -1505,6 +1735,96 @@ function createAssumption<T>(value: T): AssumptionFn<T, "unknown"> {
   };
 
   return runner as AssumptionFn<T, "unknown">;
+
+  // Local builders
+  function toDateChain(): AssumptionFn<Date, "datetime"> {
+    return Object.assign(runner as any, {
+      earlier(than: Date | number, msg?: string) {
+        add(
+          () => {
+            const v = (value as unknown as Date).getTime();
+            const t = typeof than === "number" ? than : than.getTime();
+            if (!(v < t))
+              throw new Error(
+                msg ?? `Expected earlier than ${new Date(t).toISOString()}`
+              );
+          },
+          "datetime",
+          `earlier(${typeof than === "number" ? than : (than as Date).toISOString()})`
+        );
+        return runner as any;
+      },
+      later(than: Date | number, msg?: string) {
+        add(
+          () => {
+            const v = (value as unknown as Date).getTime();
+            const t = typeof than === "number" ? than : than.getTime();
+            if (!(v > t))
+              throw new Error(
+                msg ?? `Expected later than ${new Date(t).toISOString()}`
+              );
+          },
+          "datetime",
+          `later(${typeof than === "number" ? than : (than as Date).toISOString()})`
+        );
+        return runner as any;
+      },
+      isYear(year: number, msg?: string) {
+        add(
+          () => {
+            const y = (value as unknown as Date).getFullYear();
+            if (y !== year) throw new Error(msg ?? `Expected year ${year}`);
+          },
+          "datetime",
+          `isYear(${year})`
+        );
+        return runner as any;
+      },
+      wasBefore(than: Date | number, msg?: string) {
+        add(
+          () => {
+            const v = (value as unknown as Date).getTime();
+            const t = typeof than === "number" ? than : than.getTime();
+            if (!(v < t))
+              throw new Error(
+                msg ?? `Expected before ${new Date(t).toISOString()}`
+              );
+          },
+          "datetime",
+          `wasBefore(${typeof than === "number" ? than : (than as Date).toISOString()})`
+        );
+        return runner as any;
+      },
+      daysAgoExceeds(n: number, msg?: string) {
+        add(
+          () => {
+            const now = Date.now();
+            const then = (value as unknown as Date).getTime();
+            const days = (now - then) / (1000 * 60 * 60 * 24);
+            if (!(days > n))
+              throw new Error(msg ?? `Expected more than ${n} days ago`);
+          },
+          "datetime",
+          `daysAgoExceeds(${n})`
+        );
+        return runner as any;
+      },
+      daysSinceAtLeast(n: number, msg?: string) {
+        add(
+          () => {
+            const now = Date.now();
+            const then = (value as unknown as Date).getTime();
+            const days = (now - then) / (1000 * 60 * 60 * 24);
+            if (!(days >= n))
+              throw new Error(msg ?? `Expected at least ${n} days since`);
+          },
+          "datetime",
+          `daysSinceAtLeast(${n})`
+        );
+        return runner as any;
+      },
+    }) as AssumptionFn<Date, "datetime">;
+  }
 }
 
 // Main exported functions
@@ -1597,6 +1917,781 @@ export function assumedRoute<F extends AnyFn>(
     }
   };
 }
+
+// ============================================================================
+// MINIMAL ASSERT HELPERS (alongside fluent chains)
+// ----------------------------------------------------------------------------
+// These helpers provide TypeScript `asserts`-style narrowing with minimal
+// runtime work by reusing the fluent chain checks. They throw if the
+// assumption fails; otherwise they are no-ops.
+// ----------------------------------------------------------------------------
+
+/** @internal Asserts the value is a string at runtime and for TypeScript. */
+export function assertIsString(v: unknown, msg?: string): asserts v is string {
+  // Will throw on failure; no-op on success
+  assuming(that(v).isString(), msg);
+}
+
+/** @internal Asserts the value is a number at runtime and for TypeScript. */
+export function assertIsNumber(v: unknown, msg?: string): asserts v is number {
+  assuming(that(v).isNumber(), msg);
+}
+
+/** @internal Asserts the value is an array at runtime and for TypeScript. */
+export function assertIsArray(
+  v: unknown,
+  msg?: string
+): asserts v is unknown[] {
+  assuming(that(v).isArray(), msg);
+}
+
+/** @internal Asserts the value is a plain object (non-null, non-array). */
+export function assertIsObject(
+  v: unknown,
+  msg?: string
+): asserts v is Record<string, unknown> {
+  assuming(that(v).isObject(), msg);
+}
+
+/** @internal Asserts the value is a DOM Element. */
+export function assertIsElement(
+  v: unknown,
+  msg?: string
+): asserts v is Element {
+  assuming(that(v).isElement(), msg);
+}
+
+/** @internal Asserts the value is a boolean. */
+export function assertIsBoolean(
+  v: unknown,
+  msg?: string
+): asserts v is boolean {
+  assuming(that(v).isBoolean(), msg);
+}
+
+/** @internal Asserts the value is a Date instance. */
+export function assertIsDate(v: unknown, msg?: string): asserts v is Date {
+  assuming(that(v).isDate(), msg);
+}
+
+/** @internal Asserts the value is null. Useful for explicit null checks. */
+export function assertIsNull(v: unknown, msg?: string): asserts v is null {
+  assuming(that(v).isNull(), msg);
+}
+
+/** @internal Asserts the value is not null. */
+export function assertNotNull<T>(
+  v: T,
+  msg?: string
+): asserts v is Exclude<T, null> {
+  assuming(that(v).notNull(), msg);
+}
+
+/** @internal Asserts the value is undefined. */
+export function assertIsUndefined(
+  v: unknown,
+  msg?: string
+): asserts v is undefined {
+  assuming(that(v).isUndefined(), msg);
+}
+
+/** @internal Asserts the value is not undefined. */
+export function assertNotUndefined<T>(
+  v: T,
+  msg?: string
+): asserts v is Exclude<T, undefined> {
+  // We reuse notNullOrUndefined to keep behavior consistent
+  assuming(that(v).notNullOrUndefined(), msg);
+}
+
+/** @internal Asserts the value is neither null nor undefined. */
+export function assertNotNullOrUndefined<T>(
+  v: T,
+  msg?: string
+): asserts v is NonNullable<T> {
+  assuming(that(v).notNullOrUndefined(), msg);
+}
+
+/** @internal Asserts the code path is unreachable (useful for exhaustive switches). */
+export function assertNever(x: never, msg?: string): never {
+  throw new Error(msg ?? `Unexpected value: ${String(x)}`);
+}
+
+// PascalCase aliases for ergonomic use where preferred
+export const IsString = assertIsString;
+export const IsNumber = assertIsNumber;
+export const IsArray = assertIsArray;
+export const IsObject = assertIsObject;
+export const IsElement = assertIsElement;
+export const IsBoolean = assertIsBoolean;
+export const IsDate = assertIsDate;
+export const IsNull = assertIsNull;
+export const NotNull = assertNotNull;
+export const IsUndefined = assertIsUndefined;
+export const NotUndefined = assertNotUndefined;
+export const NotNullOrUndefined = assertNotNullOrUndefined;
+
+// Themed public-facing aliases (avoid "assert" in userland API)
+export const assureString = assertIsString;
+export const assureNumber = assertIsNumber;
+export const assureArray = assertIsArray;
+export const assureObject = assertIsObject;
+export const assureElement = assertIsElement;
+export const assureBoolean = assertIsBoolean;
+export const assureDate = assertIsDate;
+export const assureNull = assertIsNull;
+export const assureNotNull = assertNotNull;
+export const assureUndefined = assertIsUndefined;
+export const assureNotUndefined = assertNotUndefined;
+export const assurePresent = assertNotNullOrUndefined;
+
+// ----------------------------------------------------------------------------
+// Targeted string helpers
+// ----------------------------------------------------------------------------
+
+export function assertStringNotEmpty(
+  v: unknown,
+  msg?: string
+): asserts v is string {
+  assuming(that(v).isString().notEmpty(), msg);
+}
+export function assertStringHasLength(
+  v: unknown,
+  len: number,
+  msg?: string
+): asserts v is string {
+  assuming(that(v).isString().hasLength(len), msg);
+}
+export function assertStringMinLength(
+  v: unknown,
+  n: number,
+  msg?: string
+): asserts v is string {
+  assuming(that(v).isString().minLength(n), msg);
+}
+export function assertStringMaxLength(
+  v: unknown,
+  n: number,
+  msg?: string
+): asserts v is string {
+  assuming(that(v).isString().maxLength(n), msg);
+}
+export function assertStringLengthBetween(
+  v: unknown,
+  min: number,
+  max: number,
+  msg?: string
+): asserts v is string {
+  assuming(that(v).isString().lengthBetween(min, max), msg);
+}
+export function assertStringContains(
+  v: unknown,
+  needle: string | RegExp,
+  msg?: string
+): asserts v is string {
+  assuming(that(v).isString().contains(needle), msg);
+}
+export function assertStringStartsWith(
+  v: unknown,
+  prefix: string,
+  msg?: string
+): asserts v is string {
+  assuming(that(v).isString().startsWith(prefix), msg);
+}
+export function assertStringEndsWith(
+  v: unknown,
+  suffix: string,
+  msg?: string
+): asserts v is string {
+  assuming(that(v).isString().endsWith(suffix), msg);
+}
+export function assertStringMatches(
+  v: unknown,
+  re: RegExp,
+  msg?: string
+): asserts v is string {
+  assuming(that(v).isString().matches(re), msg);
+}
+export function assertStringEqualsIgnoreCase(
+  v: unknown,
+  expected: string,
+  msg?: string
+): asserts v is string {
+  assuming(that(v).isString().equalsIgnoreCase(expected), msg);
+}
+export function assertStringIncludesAny(
+  v: unknown,
+  needles: string[],
+  msg?: string
+): asserts v is string {
+  assuming(
+    that(v)
+      .isString()
+      .includesAny(...needles),
+    msg
+  );
+}
+export function assertStringIncludesAll(
+  v: unknown,
+  needles: string[],
+  msg?: string
+): asserts v is string {
+  assuming(
+    that(v)
+      .isString()
+      .includesAll(...needles),
+    msg
+  );
+}
+export function assertStringIsJSON(
+  v: unknown,
+  msg?: string
+): asserts v is string {
+  assuming(that(v).isString().isJSON(), msg);
+}
+
+// ----------------------------------------------------------------------------
+// Targeted array helpers
+// ----------------------------------------------------------------------------
+
+export function assertArrayNotEmpty(
+  v: unknown,
+  msg?: string
+): asserts v is unknown[] {
+  assuming(that(v).isArray().notEmpty(), msg);
+}
+export function assertArrayHasLength(
+  v: unknown,
+  len: number,
+  msg?: string
+): asserts v is unknown[] {
+  assuming(that(v).isArray().hasLength(len), msg);
+}
+export function assertArrayItemIsBoolean(
+  v: unknown,
+  index: number,
+  msg?: string
+): asserts v is unknown[] {
+  assuming(that(v).isArray().itemIsBoolean(index), msg);
+}
+export function assertArrayItemIsString(
+  v: unknown,
+  index: number,
+  msg?: string
+): asserts v is unknown[] {
+  assuming(that(v).isArray().itemIsString(index), msg);
+}
+export function assertArrayItemIsNumber(
+  v: unknown,
+  index: number,
+  msg?: string
+): asserts v is unknown[] {
+  assuming(that(v).isArray().itemIsNumber(index), msg);
+}
+export function assertArrayItemIsObject(
+  v: unknown,
+  index: number,
+  msg?: string
+): asserts v is unknown[] {
+  assuming(that(v).isArray().itemIsObject(index), msg);
+}
+export function assertArrayIncludesString(
+  v: unknown,
+  needle: string,
+  msg?: string
+): asserts v is unknown[] {
+  assuming(that(v).isArray().includesString(needle), msg);
+}
+export function assertArrayIncludesNumber(
+  v: unknown,
+  needle: number,
+  msg?: string
+): asserts v is unknown[] {
+  assuming(that(v).isArray().includesNumber(needle), msg);
+}
+export function assertArrayIncludesObject(
+  v: unknown,
+  needle: Record<string, unknown>,
+  msg?: string
+): asserts v is unknown[] {
+  assuming(that(v).isArray().includesObject(needle), msg);
+}
+export function assertArrayOnlyStrings(
+  v: unknown,
+  msg?: string
+): asserts v is string[] {
+  assuming(that(v).isArray().onlyHasStrings(), msg);
+}
+export function assertArrayOnlyNumbers(
+  v: unknown,
+  msg?: string
+): asserts v is number[] {
+  assuming(that(v).isArray().onlyHasNumbers(), msg);
+}
+export function assertArrayOnlyObjects(
+  v: unknown,
+  msg?: string
+): asserts v is Record<string, unknown>[] {
+  assuming(that(v).isArray().onlyHasObjects(), msg);
+}
+export function assertArrayEveryTruthy(
+  v: unknown,
+  msg?: string
+): asserts v is unknown[] {
+  assuming(that(v).isArray().everyIsTruthy(), msg);
+}
+export function assertArrayEveryFalsy(
+  v: unknown,
+  msg?: string
+): asserts v is unknown[] {
+  assuming(that(v).isArray().everyIsFalsy(), msg);
+}
+
+// ----------------------------------------------------------------------------
+// Targeted object helpers
+// ----------------------------------------------------------------------------
+
+export function assertObjectHasKey<T extends object, K extends string>(
+  obj: T,
+  key: K,
+  msg?: string
+): asserts obj is T & Record<K, unknown> {
+  assuming(that(obj).isObject().hasKey(key), msg);
+}
+
+export function assertObjectHasKeys<
+  T extends object,
+  K extends readonly string[],
+>(
+  obj: T,
+  keys: K,
+  msg?: string
+): asserts obj is T & Record<K[number], unknown> {
+  assuming(
+    that(obj)
+      .isObject()
+      .hasKeys(...keys),
+    msg
+  );
+}
+
+export function assertObjectKeyEquals<
+  T extends object,
+  K extends string,
+  V = unknown,
+>(obj: T, key: K, expected: V, msg?: string): asserts obj is T & Record<K, V> {
+  assuming(that(obj).isObject().keyEquals(key, expected), msg);
+}
+
+// Make all keys required and exclude `undefined` from their types
+export function assertObjectAllKeysSet<T extends object>(
+  obj: T,
+  msg?: string
+): asserts obj is { [P in keyof T]-?: Exclude<T[P], undefined> } {
+  assuming(that(obj).isObject().allKeysSet(), msg);
+}
+
+export function assertObjectAnyKeyNull(
+  obj: unknown,
+  msg?: string
+): asserts obj is Record<string, unknown> {
+  assuming(that(obj).isObject().anyKeyNull(), msg);
+}
+
+/** Object keys must match exactly the provided list (no missing, no extra). */
+export function assertObjectKeysExactly<K extends readonly string[]>(
+  obj: unknown,
+  keys: K,
+  msg?: string
+): asserts obj is { [P in K[number]]: unknown } {
+  const expected: Record<string, unknown> = Object.fromEntries(
+    (keys as readonly string[]).map((k) => [k, true])
+  );
+  // Reuse sameKeys which compares key sets
+  assuming(that(obj).isObject().sameKeys(expected), msg);
+}
+
+// Themed aliases for targeted helpers
+export const assureStringNotEmpty = assertStringNotEmpty;
+export const assureStringHasLength = assertStringHasLength;
+export const assureStringMinLength = assertStringMinLength;
+export const assureStringMaxLength = assertStringMaxLength;
+export const assureStringLengthBetween = assertStringLengthBetween;
+export const assureStringContains = assertStringContains;
+export const assureStringStartsWith = assertStringStartsWith;
+export const assureStringEndsWith = assertStringEndsWith;
+export const assureStringMatches = assertStringMatches;
+export const assureStringEqualsIgnoreCase = assertStringEqualsIgnoreCase;
+export const assureStringIncludesAny = assertStringIncludesAny;
+export const assureStringIncludesAll = assertStringIncludesAll;
+export const assureStringIsJSON = assertStringIsJSON;
+export const assureArrayNotEmpty = assertArrayNotEmpty;
+export const assureArrayHasLength = assertArrayHasLength;
+export const assureArrayItemIsBoolean = assertArrayItemIsBoolean;
+export const assureArrayItemIsString = assertArrayItemIsString;
+export const assureArrayItemIsNumber = assertArrayItemIsNumber;
+export const assureArrayItemIsObject = assertArrayItemIsObject;
+export const assureArrayIncludesString = assertArrayIncludesString;
+export const assureArrayIncludesNumber = assertArrayIncludesNumber;
+export const assureArrayIncludesObject = assertArrayIncludesObject;
+export const assureArrayOnlyStrings = assertArrayOnlyStrings;
+export const assureArrayOnlyNumbers = assertArrayOnlyNumbers;
+export const assureArrayOnlyObjects = assertArrayOnlyObjects;
+export const assureArrayEveryTruthy = assertArrayEveryTruthy;
+export const assureArrayEveryFalsy = assertArrayEveryFalsy;
+export const assureArrayUnique = assertArrayUnique;
+export const assureObjectHasKey = assertObjectHasKey;
+export const assureObjectHasKeys = assertObjectHasKeys;
+export const assureObjectKeyEquals = assertObjectKeyEquals;
+export const assureObjectAllKeysSet = assertObjectAllKeysSet;
+export const assureObjectAnyKeyNull = assertObjectAnyKeyNull;
+export const assureObjectKeysExactly = assertObjectKeysExactly;
+
+// ----------------------------------------------------------------------------
+// Extra targeted convenience helpers
+// ----------------------------------------------------------------------------
+
+/** Assert a string is non-empty after trimming whitespace. */
+export function assertStringTrimmedNotEmpty(
+  v: unknown,
+  msg?: string
+): asserts v is string {
+  assuming(
+    that(v)
+      .isString()
+      .that((s) => s.trim().length > 0, msg ?? "Expected non-empty (trimmed)"),
+    msg
+  );
+}
+
+/** Assert an array has all unique items (===) */
+export function assertArrayUnique(
+  v: unknown,
+  msg?: string
+): asserts v is unknown[] {
+  assuming(
+    that(v)
+      .isArray()
+      .that(
+        (arr) => new Set(arr as any[]).size === (arr as any[]).length,
+        msg ?? "Expected array items to be unique"
+      ),
+    msg
+  );
+}
+
+// ----------------------------------------------------------------------------
+// Value-returning "expect" helpers (assert + return the value)
+// ----------------------------------------------------------------------------
+
+export function expectString<T>(v: T, msg?: string): string {
+  assertIsString(v as unknown, msg);
+  return v as unknown as string;
+}
+export function expectNumber<T>(v: T, msg?: string): number {
+  assertIsNumber(v as unknown, msg);
+  return v as unknown as number;
+}
+export function expectArray<T>(v: T, msg?: string): unknown[] {
+  assertIsArray(v as unknown, msg);
+  return v as unknown as unknown[];
+}
+export function expectObject<T>(v: T, msg?: string): Record<string, unknown> {
+  assertIsObject(v as unknown, msg);
+  return v as unknown as Record<string, unknown>;
+}
+export function expectBoolean<T>(v: T, msg?: string): boolean {
+  assertIsBoolean(v as unknown, msg);
+  return v as unknown as boolean;
+}
+export function expectDate<T>(v: T, msg?: string): Date {
+  assertIsDate(v as unknown, msg);
+  return v as unknown as Date;
+}
+export function expectElement<T>(v: T, msg?: string): Element {
+  assertIsElement(v as unknown, msg);
+  return v as unknown as Element;
+}
+export function expectNotNullOrUndefined<T>(
+  v: T,
+  msg?: string
+): NonNullable<T> {
+  assertNotNullOrUndefined(v, msg);
+  return v as NonNullable<T>;
+}
+
+// ----------------------------------------------------------------------------
+// "sure" aliases and bound closures (nomenclature alternatives)
+// ----------------------------------------------------------------------------
+// Some users prefer the word "sure" over "assure". To support that taste
+// without breaking changes, we expose two forms:
+// 1) Immediate assertions (aliases) — same as assure*/assert* but named sure*
+// 2) Bound closures (sureIs*) — produce a zero-arg function that defers the
+//    assertion until called, ideal for assuming(sureIsString(value)).
+
+// 1) Immediate assertion aliases
+export const sureString = assertIsString;
+export const sureNumber = assertIsNumber;
+export const sureArray = assertIsArray;
+export const sureObject = assertIsObject;
+export const sureElement = assertIsElement;
+export const sureBoolean = assertIsBoolean;
+export const sureDate = assertIsDate;
+export const sureNull = assertIsNull;
+export const sureNotNull = assertNotNull;
+export const sureUndefined = assertIsUndefined;
+export const sureNotUndefined = assertNotUndefined;
+export const surePresent = assertNotNullOrUndefined;
+
+// Targeted string aliases
+export const sureStringNotEmpty = assertStringNotEmpty;
+export const sureStringHasLength = assertStringHasLength;
+export const sureStringMinLength = assertStringMinLength;
+export const sureStringMaxLength = assertStringMaxLength;
+export const sureStringLengthBetween = assertStringLengthBetween;
+export const sureStringContains = assertStringContains;
+export const sureStringStartsWith = assertStringStartsWith;
+export const sureStringEndsWith = assertStringEndsWith;
+export const sureStringMatches = assertStringMatches;
+export const sureStringEqualsIgnoreCase = assertStringEqualsIgnoreCase;
+export const sureStringIncludesAny = assertStringIncludesAny;
+export const sureStringIncludesAll = assertStringIncludesAll;
+export const sureStringIsJSON = assertStringIsJSON;
+export const sureStringTrimmedNotEmpty = assertStringTrimmedNotEmpty;
+
+// Targeted array/object aliases
+export const sureArrayNotEmpty = assertArrayNotEmpty;
+export const sureArrayHasLength = assertArrayHasLength;
+export const sureArrayItemIsBoolean = assertArrayItemIsBoolean;
+export const sureArrayItemIsString = assertArrayItemIsString;
+export const sureArrayItemIsNumber = assertArrayItemIsNumber;
+export const sureArrayItemIsObject = assertArrayItemIsObject;
+export const sureArrayIncludesString = assertArrayIncludesString;
+export const sureArrayIncludesNumber = assertArrayIncludesNumber;
+export const sureArrayIncludesObject = assertArrayIncludesObject;
+export const sureArrayOnlyStrings = assertArrayOnlyStrings;
+export const sureArrayOnlyNumbers = assertArrayOnlyNumbers;
+export const sureArrayOnlyObjects = assertArrayOnlyObjects;
+export const sureArrayEveryTruthy = assertArrayEveryTruthy;
+export const sureArrayEveryFalsy = assertArrayEveryFalsy;
+export const sureArrayUnique = assertArrayUnique;
+
+export const sureObjectHasKey = assertObjectHasKey;
+export const sureObjectHasKeys = assertObjectHasKeys;
+export const sureObjectKeyEquals = assertObjectKeyEquals;
+export const sureObjectAllKeysSet = assertObjectAllKeysSet;
+export const sureObjectAnyKeyNull = assertObjectAnyKeyNull;
+export const sureObjectKeysExactly = assertObjectKeysExactly;
+
+// 2) Bound closures for assuming(...)
+// Usage: assuming(sureIsString(name), sureNotNull(user))
+export const sureIsString = (v: unknown, msg?: string) => () =>
+  assertIsString(v, msg);
+export const sureIsNumber = (v: unknown, msg?: string) => () =>
+  assertIsNumber(v, msg);
+export const sureIsArray = (v: unknown, msg?: string) => () =>
+  assertIsArray(v, msg);
+export const sureIsObject = (v: unknown, msg?: string) => () =>
+  assertIsObject(v, msg);
+export const sureIsElement = (v: unknown, msg?: string) => () =>
+  assertIsElement(v, msg);
+export const sureIsBoolean = (v: unknown, msg?: string) => () =>
+  assertIsBoolean(v, msg);
+export const sureIsDate = (v: unknown, msg?: string) => () =>
+  assertIsDate(v, msg);
+export const sureIsNull = (v: unknown, msg?: string) => () =>
+  assertIsNull(v, msg);
+export const sureIsUndefined = (v: unknown, msg?: string) => () =>
+  assertIsUndefined(v, msg);
+
+export const sureNotNil =
+  <T>(v: T, msg?: string) =>
+  () =>
+    assertNotNullOrUndefined(v, msg);
+export const sureNotNullBound =
+  <T>(v: T, msg?: string) =>
+  () =>
+    assertNotNull(v, msg);
+export const sureNotUndefinedBound =
+  <T>(v: T, msg?: string) =>
+  () =>
+    assertNotUndefined(v, msg);
+
+// ----------------------------------------------------------------------------
+// "mustBe" aliases and closure object (even simpler naming)
+// ----------------------------------------------------------------------------
+// Immediate assertion aliases
+export const mustBeString = assertIsString;
+export const mustBeNumber = assertIsNumber;
+export const mustBeArray = assertIsArray;
+export const mustBeObject = assertIsObject;
+export const mustBeElement = assertIsElement;
+export const mustBeBoolean = assertIsBoolean;
+export const mustBeDate = assertIsDate;
+export const mustBeNull = assertIsNull;
+export const mustBeUndefined = assertIsUndefined;
+export const mustBePresent = assertNotNullOrUndefined;
+// Friendlier naming for "present"
+export const mustExists = assertNotNullOrUndefined;
+export const mustExist = assertNotNullOrUndefined;
+
+// Targeted immediate aliases
+export const mustBeStringNotEmpty = assertStringNotEmpty;
+export const mustBeStringHasLength = assertStringHasLength;
+export const mustBeStringMinLength = assertStringMinLength;
+export const mustBeStringMaxLength = assertStringMaxLength;
+export const mustBeStringLengthBetween = assertStringLengthBetween;
+export const mustBeStringContains = assertStringContains;
+export const mustBeStringStartsWith = assertStringStartsWith;
+export const mustBeStringEndsWith = assertStringEndsWith;
+export const mustBeStringMatches = assertStringMatches;
+export const mustBeStringEqualsIgnoreCase = assertStringEqualsIgnoreCase;
+export const mustBeStringIncludesAny = assertStringIncludesAny;
+export const mustBeStringIncludesAll = assertStringIncludesAll;
+export const mustBeStringIsJSON = assertStringIsJSON;
+export const mustBeStringTrimmedNotEmpty = assertStringTrimmedNotEmpty;
+
+export const mustBeArrayNotEmpty = assertArrayNotEmpty;
+export const mustBeArrayHasLength = assertArrayHasLength;
+export const mustBeArrayItemIsBoolean = assertArrayItemIsBoolean;
+export const mustBeArrayItemIsString = assertArrayItemIsString;
+export const mustBeArrayItemIsNumber = assertArrayItemIsNumber;
+export const mustBeArrayItemIsObject = assertArrayItemIsObject;
+export const mustBeArrayIncludesString = assertArrayIncludesString;
+export const mustBeArrayIncludesNumber = assertArrayIncludesNumber;
+export const mustBeArrayIncludesObject = assertArrayIncludesObject;
+export const mustBeArrayOnlyStrings = assertArrayOnlyStrings;
+export const mustBeArrayOnlyNumbers = assertArrayOnlyNumbers;
+export const mustBeArrayOnlyObjects = assertArrayOnlyObjects;
+export const mustBeArrayEveryTruthy = assertArrayEveryTruthy;
+export const mustBeArrayEveryFalsy = assertArrayEveryFalsy;
+export const mustBeArrayUnique = assertArrayUnique;
+
+export const mustBeObjectHasKey = assertObjectHasKey;
+export const mustBeObjectHasKeys = assertObjectHasKeys;
+export const mustBeObjectKeyEquals = assertObjectKeyEquals;
+export const mustBeObjectAllKeysSet = assertObjectAllKeysSet;
+export const mustBeObjectAnyKeyNull = assertObjectAnyKeyNull;
+export const mustBeObjectKeysExactly = assertObjectKeysExactly;
+
+// Closure factory object for use with assuming(...)
+export const mustBe = {
+  string: (v: unknown, msg?: string) => () => assertIsString(v, msg),
+  number: (v: unknown, msg?: string) => () => assertIsNumber(v, msg),
+  array: (v: unknown, msg?: string) => () => assertIsArray(v, msg),
+  object: (v: unknown, msg?: string) => () => assertIsObject(v, msg),
+  element: (v: unknown, msg?: string) => () => assertIsElement(v, msg),
+  boolean: (v: unknown, msg?: string) => () => assertIsBoolean(v, msg),
+  date: (v: unknown, msg?: string) => () => assertIsDate(v, msg),
+  null: (v: unknown, msg?: string) => () => assertIsNull(v, msg),
+  undefined: (v: unknown, msg?: string) => () => assertIsUndefined(v, msg),
+  present:
+    <T>(v: T, msg?: string) =>
+    () =>
+      assertNotNullOrUndefined(v, msg),
+  // Friendlier synonyms
+  exist:
+    <T>(v: T, msg?: string) =>
+    () =>
+      assertNotNullOrUndefined(v, msg),
+  exists:
+    <T>(v: T, msg?: string) =>
+    () =>
+      assertNotNullOrUndefined(v, msg),
+
+  // targeted
+  stringNotEmpty: (v: unknown, msg?: string) => () =>
+    assertStringNotEmpty(v, msg),
+  stringHasLength: (v: unknown, len: number, msg?: string) => () =>
+    assertStringHasLength(v, len, msg),
+  stringMinLength: (v: unknown, n: number, msg?: string) => () =>
+    assertStringMinLength(v, n, msg),
+  stringMaxLength: (v: unknown, n: number, msg?: string) => () =>
+    assertStringMaxLength(v, n, msg),
+  stringLengthBetween:
+    (v: unknown, min: number, max: number, msg?: string) => () =>
+      assertStringLengthBetween(v, min, max, msg),
+  stringContains: (v: unknown, needle: string | RegExp, msg?: string) => () =>
+    assertStringContains(v, needle, msg),
+  stringStartsWith: (v: unknown, prefix: string, msg?: string) => () =>
+    assertStringStartsWith(v, prefix, msg),
+  stringEndsWith: (v: unknown, suffix: string, msg?: string) => () =>
+    assertStringEndsWith(v, suffix, msg),
+  stringMatches: (v: unknown, re: RegExp, msg?: string) => () =>
+    assertStringMatches(v, re, msg),
+  stringEqualsIgnoreCase: (v: unknown, expected: string, msg?: string) => () =>
+    assertStringEqualsIgnoreCase(v, expected, msg),
+  stringIncludesAny: (v: unknown, needles: string[], msg?: string) => () =>
+    assertStringIncludesAny(v, needles, msg),
+  stringIncludesAll: (v: unknown, needles: string[], msg?: string) => () =>
+    assertStringIncludesAll(v, needles, msg),
+  stringIsJSON: (v: unknown, msg?: string) => () => assertStringIsJSON(v, msg),
+  stringTrimmedNotEmpty: (v: unknown, msg?: string) => () =>
+    assertStringTrimmedNotEmpty(v, msg),
+
+  arrayNotEmpty: (v: unknown, msg?: string) => () =>
+    assertArrayNotEmpty(v, msg),
+  arrayHasLength: (v: unknown, len: number, msg?: string) => () =>
+    assertArrayHasLength(v, len, msg),
+  arrayItemIsBoolean: (v: unknown, index: number, msg?: string) => () =>
+    assertArrayItemIsBoolean(v, index, msg),
+  arrayItemIsString: (v: unknown, index: number, msg?: string) => () =>
+    assertArrayItemIsString(v, index, msg),
+  arrayItemIsNumber: (v: unknown, index: number, msg?: string) => () =>
+    assertArrayItemIsNumber(v, index, msg),
+  arrayItemIsObject: (v: unknown, index: number, msg?: string) => () =>
+    assertArrayItemIsObject(v, index, msg),
+  arrayIncludesString: (v: unknown, needle: string, msg?: string) => () =>
+    assertArrayIncludesString(v, needle, msg),
+  arrayIncludesNumber: (v: unknown, needle: number, msg?: string) => () =>
+    assertArrayIncludesNumber(v, needle, msg),
+  arrayIncludesObject:
+    (v: unknown, needle: Record<string, unknown>, msg?: string) => () =>
+      assertArrayIncludesObject(v, needle, msg),
+  arrayOnlyStrings: (v: unknown, msg?: string) => () =>
+    assertArrayOnlyStrings(v, msg),
+  arrayOnlyNumbers: (v: unknown, msg?: string) => () =>
+    assertArrayOnlyNumbers(v, msg),
+  arrayOnlyObjects: (v: unknown, msg?: string) => () =>
+    assertArrayOnlyObjects(v, msg),
+  arrayEveryTruthy: (v: unknown, msg?: string) => () =>
+    assertArrayEveryTruthy(v, msg),
+  arrayEveryFalsy: (v: unknown, msg?: string) => () =>
+    assertArrayEveryFalsy(v, msg),
+  arrayUnique: (v: unknown, msg?: string) => () => assertArrayUnique(v, msg),
+
+  objectHasKey:
+    <T extends object, K extends string>(obj: T, key: K, msg?: string) =>
+    () =>
+      assertObjectHasKey(obj, key, msg),
+  objectHasKeys:
+    <T extends object, K extends readonly string[]>(
+      obj: T,
+      keys: K,
+      msg?: string
+    ) =>
+    () =>
+      assertObjectHasKeys(obj, keys, msg),
+  objectKeyEquals:
+    <T extends object, K extends string, V = unknown>(
+      obj: T,
+      key: K,
+      expected: V,
+      msg?: string
+    ) =>
+    () =>
+      assertObjectKeyEquals(obj, key, expected, msg),
+  objectAllKeysSet:
+    <T extends object>(obj: T, msg?: string) =>
+    () =>
+      assertObjectAllKeysSet(obj, msg),
+  objectAnyKeyNull: (obj: unknown, msg?: string) => () =>
+    assertObjectAnyKeyNull(obj, msg),
+  objectKeysExactly:
+    <K extends readonly string[]>(obj: unknown, keys: K, msg?: string) =>
+    () =>
+      assertObjectKeysExactly(obj, keys, msg),
+} as const;
 
 // ============================================================================
 // LEGACY CHECKS SYSTEM (COMMENTED OUT - GOOD IDEAS BUT REPLACED BY CHAINS)
@@ -1781,5 +2876,8 @@ export function assertIsObject<T extends object = Record<string, unknown>>(v: un
 // ============================================================================
 // ACTIVE CODE CONTINUES HERE...
 // ============================================================================
+
+// Re-export validation registry for convenience
+export * from "./validation-registry";
 
 //
