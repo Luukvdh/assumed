@@ -10,7 +10,8 @@
       "import": "./dist/assume.js",
       "require": "./dist/assume.js",
       "types": "./dist/assume.d.ts"
-    }
+    },
+     "./*": "./dist/*.js"
   },
   "files": [
     "dist/assume.js",
