@@ -6,8 +6,8 @@
   "main": "./dist/assume.js",
   "exports": {
     ".": {
-      "import": "./dist/assume.js",
-      "require": "./dist/assume.js"
+      "types": "./src/assume.ts",
+      "import": "./dist/assume.js"
     },
     "./*": "./dist/*.js"
   },
