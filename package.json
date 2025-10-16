@@ -11,12 +11,14 @@
       "require": "./dist/assume.js",
       "types": "./dist/assume.d.ts"
     },
-     "./*": "./dist/*.js"
+    "./*": "./dist/*.js"
   },
   "files": [
     "dist/assume.js",
     "dist/assume.d.ts",
-    "src/assume.ts"
+    "src/assume.ts",
+    "src/assume.d.ts",
+    "dist/assumed.browser.min.js"
   ],
   "keywords": [
     "assert",
@@ -36,6 +38,10 @@
   "author": "Luuk van den Hoogen",
   "scripts": {
     "build": "tsc",
+    "build:browser": "esbuild src/assume.ts --bundle --minify --format=iife --global-name=Assumed --platform=browser --outfile=dist/assumed.browser.min.js",
     "clean": "rimraf dist public/js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.21.5"
   }
 }
