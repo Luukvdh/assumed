@@ -560,10 +560,16 @@ export function assuming(
      * Run a handler only when assumptions pass. Errors thrown by the handler will propagate.
      * @param fn Zero-argument function to run on success. Its return is captured by value().
      */
-    Run<T, R>(fn: (value: T | undefined) => R) {
+    Run<R>(fn: () => R) {
       // Emit right before running user code, after chains completed
       ensureEmitted();
-      if (!failed) lastResult = fn(lastResult as T);
+      if (!failed) lastResult = fn();
+      return api; // FLUENT
+    },
+    RunWithValue<T, R>(fn: (value: T | undefined) => R): any {
+      // Emit right before running user code, after chains completed
+      ensureEmitted();
+      if (!failed) lastResult = fn(lastResult as T | undefined);
       return api; // FLUENT
     },
     // Optional accessor for the value produced by last Run/result

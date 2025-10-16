@@ -179,6 +179,7 @@ export declare function assuming(...args: Array<Assumption | AssumingOptions | s
      * @param fn Zero-argument function to run on success. Its return is captured by value().
      */
     Run<R>(fn: () => R): /*elided*/ any;
+    RunWithValue<T, R>(fn: (value: T | undefined) => R): any;
     /**
      * Retrieve the last result produced by Run()/result()/onRefuted()/onVindicated()/catch().
      */
