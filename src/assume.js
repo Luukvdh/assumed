@@ -245,6 +245,14 @@ export function assuming(...args) {
                 lastResult = fn();
             return api; // FLUENT
         },
+
+        RunResult(fn) {
+            // Emit right before running user code, after chains completed
+            ensureEmitted();
+            if (!failed)
+                lastResult = fn(lastResult);
+            return api; // FLUENT
+        },
         // Optional accessor for the value produced by last Run/result
         /**
          * Retrieve the last result produced by Run()/result()/onRefuted()/onVindicated()/catch().
@@ -723,9 +731,7 @@ function createAssumption(value) {
             return value;
         },
         /** Alias for value() for backward compatibility. */
-        commit() {
-            return this.value();
-        },
+
     };
     Object.assign(runner, base);
     // Natural terminal: property getter that runs the checks and returns the value
