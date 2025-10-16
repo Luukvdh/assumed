@@ -245,6 +245,13 @@ export function assuming(...args) {
                 lastResult = fn();
             return api; // FLUENT
         },
+        RunWithValue(fn) {
+            // Emit right before running user code, after chains completed
+            ensureEmitted();
+            if (!failed)
+                lastResult = fn(lastResult);
+            return api; // FLUENT
+        },
         // Optional accessor for the value produced by last Run/result
         /**
          * Retrieve the last result produced by Run()/result()/onRefuted()/onVindicated()/catch().

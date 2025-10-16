@@ -4,12 +4,10 @@
   "description": "Typescript fast & easy asserts",
   "type": "module",
   "main": "./dist/assume.js",
-  "types": "./dist/assume.d.ts",
   "exports": {
     ".": {
       "import": "./dist/assume.js",
-      "require": "./dist/assume.js",
-      "types": "./dist/assume.d.ts"
+      "require": "./dist/assume.js"
     },
     "./*": "./dist/*.js"
   },
