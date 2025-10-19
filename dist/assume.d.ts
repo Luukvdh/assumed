@@ -34,7 +34,7 @@ interface BaseChain<T, K extends TypeTag> {
     or(condition: boolean | (() => boolean | void), msg?: string): AssumptionFn<T, K>;
     /** Apply an additional type-guard to narrow the chain value. */
     andGuard<S extends T>(guard: (v: T) => v is S, msg?: string): AssumptionFn<S, DetectTypeTag<S>>;
-    that(predicate: (v: T) => boolean, msg?: string): AssumptionFn<T, K>;
+    that(predicate: ((v: T) => boolean) | boolean, msg?: string): AssumptionFn<T, K>;
     equals(expected: T, msg?: string): AssumptionFn<T, K>;
     instanceof(expectedOrMsg?: string | (new (...args: any[]) => any) | undefined, msg?: string | undefined): AssumptionFn<T, DetectTypeTag<T>> | AssumptionFn<T, TypeTag> | void;
     value(): T;
@@ -291,6 +291,7 @@ export type AnyFn = (...args: any[]) => any;
  */
 export declare function defRefHandler<R>(def: R, log?: ((err: unknown) => void) | boolean): (err: unknown) => R;
 /**
+
  * Create a default refute handler for asynchronous code.
  * @param def Default resolved value to return when an error occurs.
  * @param log When true, logs to console; or provide a custom logger function.
@@ -456,6 +457,7 @@ export declare const assureObjectKeyEquals: typeof assertObjectKeyEquals;
 export declare const assureObjectAllKeysSet: typeof assertObjectAllKeysSet;
 export declare const assureObjectAnyKeyNull: typeof assertObjectAnyKeyNull;
 export declare const assureObjectKeysExactly: typeof assertObjectKeysExactly;
+export declare const assureElementIsChildOf: typeof assertElementIsChildOf;
 /** Assert a string is non-empty after trimming whitespace. */
 export declare function assertStringTrimmedNotEmpty(v: unknown, msg?: string): asserts v is string;
 /** Assert an array has all unique items (===) */
@@ -697,7 +699,6 @@ export declare const assertions: {
     readonly stringIsJSON: typeof assertStringIsJSON;
     readonly stringTrimmedNotEmpty: typeof assertStringTrimmedNotEmpty;
     readonly stringOneOf: typeof assertStringOneOf;
-    readonly stringEqualsIgnoreWhitespace: typeof assertStringEqualsIgnoreWhitespace;
     readonly isBase64: typeof isBase64;
     readonly arrayNotEmpty: typeof assertArrayNotEmpty;
     readonly arrayHasLength: typeof assertArrayHasLength;

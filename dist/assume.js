@@ -560,32 +560,28 @@ function createAssumption(value) {
                 });
             }
             catch (e) {
-                if (isAssumptionError(e)) {
-                    pushAssumeEvent({
-                        t: Date.now(),
-                        kind: "refuted",
-                        info: { message: e.message },
-                    });
-                    throw e;
-                }
+                pushAssumeEvent({
+                    t: Date.now(),
+                    kind: "refuted",
+                    info: { message: String(e) },
+                });
+                //throw e;
                 // Build a brief inference report about the offending value
                 let inferenceText = undefined;
-                try {
-                    const results = report(value);
-                    const pass = results.filter((r) => r.passed).map((r) => r.name);
-                    const fail = results.filter((r) => !r.passed).map((r) => r.name);
-                    const passShow = pass.slice(0, 4).join(", ");
-                    const failShow = fail.slice(0, 3).join(", ");
-                    const morePass = pass.length > 4 ? `, +${pass.length - 4} more` : "";
-                    const moreFail = fail.length > 3 ? `, +${fail.length - 3} more` : "";
-                    const passLine = passShow ? `Pass: [${passShow}${morePass}]` : "";
-                    const failLine = failShow ? `Fail: [${failShow}${moreFail}]` : "";
-                    const combined = [passLine, failLine].filter(Boolean).join("; ");
-                    if (combined)
-                        inferenceText = `Inferred: ${combined}`;
-                }
-                catch { }
-                const err = new AssumptionError(e instanceof Error ? e.message : String(e), {
+                //try {
+                //  const results = report(value);
+                //  const pass = results.filter((r) => r.passed).map((r) => r.name);
+                //  const fail = results.filter((r) => !r.passed).map((r) => r.name);
+                //  const passShow = pass.slice(0, 4).join(", ");
+                //  const failShow = fail.slice(0, 3).join(", ");
+                //  const morePass = pass.length > 4 ? `, +${pass.length - 4} more` : "";
+                //  const moreFail = fail.length > 3 ? `, +${fail.length - 3} more` : "";
+                //  const passLine = passShow ? `Pass: [${passShow}${morePass}]` : "";
+                //  const failLine = failShow ? `Fail: [${failShow}${moreFail}]` : "";
+                //  const combined = [passLine, failLine].filter(Boolean).join("; ");
+                //  if (combined) inferenceText = `Inferred: ${combined}`;
+                //} catch {}
+                const err = new AssumptionError(String(e), {
                     stack: queue.slice(),
                     value,
                     cause: e,
@@ -677,8 +673,17 @@ function createAssumption(value) {
         },
         that(predicate, msg) {
             add(() => {
-                if (!predicate(value))
-                    throw new Error(msg ?? "Assumption failed");
+                if (typeof predicate === "function") {
+                    if (!predicate(value))
+                        throw new Error(msg ?? "Assumption failed");
+                }
+                else if (typeof predicate === "boolean") {
+                    if (!predicate)
+                        throw new Error(msg ?? "Assumption failed");
+                }
+                else {
+                    throw new Error("Predicate must be a function or boolean");
+                }
             }, "unknown", "that");
             return runner;
         },
@@ -1451,6 +1456,7 @@ export function defRefHandler(def, log = false) {
     };
 }
 /**
+
  * Create a default refute handler for asynchronous code.
  * @param def Default resolved value to return when an error occurs.
  * @param log When true, logs to console; or provide a custom logger function.
@@ -1804,6 +1810,7 @@ export const assureObjectKeyEquals = assertObjectKeyEquals;
 export const assureObjectAllKeysSet = assertObjectAllKeysSet;
 export const assureObjectAnyKeyNull = assertObjectAnyKeyNull;
 export const assureObjectKeysExactly = assertObjectKeysExactly;
+export const assureElementIsChildOf = assertElementIsChildOf;
 // ----------------------------------------------------------------------------
 // Extra targeted convenience helpers
 // ----------------------------------------------------------------------------
@@ -2130,7 +2137,7 @@ export function reportAssertions(v, filter) {
             return {
                 name: e.name,
                 passed: false,
-                error: err instanceof Error ? err.message : String(err),
+                error: String(err),
             };
         }
     });
@@ -2342,7 +2349,6 @@ export const assertions = {
     stringIsJSON: assertStringIsJSON,
     stringTrimmedNotEmpty: assertStringTrimmedNotEmpty,
     stringOneOf: assertStringOneOf,
-    stringEqualsIgnoreWhitespace: assertStringEqualsIgnoreWhitespace,
     isBase64: isBase64,
     // Array-targeted
     arrayNotEmpty: assertArrayNotEmpty,
@@ -2606,8 +2612,3 @@ export function assertIsObject<T extends object = Record<string, unknown>>(v: un
 
 // LESSON: Don't create wrapper functions for things that are already clean
 */
-// ============================================================================
-// ACTIVE CODE CONTINUES HERE...
-// ============================================================================
-// Re-export validation registry for convenience
-//

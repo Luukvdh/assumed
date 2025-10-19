@@ -1,6 +1,6 @@
 {
   "name": "assumed",
-  "version": "1.6.6",
+  "version": "1.6.9",
   "description": "Typescript fast & easy asserts",
   "type": "module",
   "main": "./dist/assume.js",
@@ -16,7 +16,8 @@
     "dist/assume.d.ts",
     "src/assume.ts",
     "src/assume.d.ts",
-    "dist/assumed.browser.min.js"
+    "dist/primitiveprimer.global.min.mjs",
+    "dist/assumed.global.min.mjs"
   ],
   "keywords": [
     "assert",
