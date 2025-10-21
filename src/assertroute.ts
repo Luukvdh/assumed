@@ -94,6 +94,16 @@ export function isNumber(x: unknown): x is number {
 }
 
 /**
+ * Returns true if x is a finite number.
+ *
+ * Narrowing:
+ * - On a true branch, TypeScript narrows x to number.
+ */
+export function isNumberNotZero(x: unknown): x is number {
+  return typeof x === 'number' && Number.isFinite(x) && x !== 0;
+}
+
+/**
  * Returns true if x is a boolean.
  *
  * Narrowing:
@@ -642,7 +652,7 @@ export function assertStringIncludesAny(x: unknown, ...needles: string[]): asser
   const s = x as string;
   assert(
     needles.some((n) => s.includes(n)),
-    `Expected string to include any of [${needles.join(', ')}]`,
+    `Expected string to include any of [${needles.join(', ')}]`
   );
 }
 
@@ -652,7 +662,7 @@ export function assertStringIncludesAll(x: unknown, ...needles: string[]): asser
   const s = x as string;
   assert(
     needles.every((n) => s.includes(n)),
-    `Expected string to include all of [${needles.join(', ')}]`,
+    `Expected string to include all of [${needles.join(', ')}]`
   );
 }
 
@@ -761,7 +771,7 @@ export function assertArrayIncludesString<T = unknown>(x: unknown, needle: strin
   assertArray<T>(x, message ?? `Expected array`);
   assert(
     (x as any[]).some((item) => String(item).includes(needle)),
-    message ?? `Expected array to include string containing "${needle}"`,
+    message ?? `Expected array to include string containing "${needle}"`
   );
 }
 
@@ -770,7 +780,7 @@ export function assertArrayIncludesNumber<T = unknown>(x: unknown, needle: numbe
   assertArray<T>(x, message ?? `Expected array`);
   assert(
     (x as any[]).some((item) => item === needle),
-    message ?? `Expected array to include number ${needle}`,
+    message ?? `Expected array to include number ${needle}`
   );
 }
 
@@ -780,7 +790,7 @@ export function assertArrayIncludesObject<T = unknown>(x: unknown, needle: Recor
   const needleStr = JSON.stringify(needle);
   assert(
     (x as any[]).some((item) => JSON.stringify(item) === needleStr),
-    message ?? `Expected array to include object ${needleStr}`,
+    message ?? `Expected array to include object ${needleStr}`
   );
 }
 
@@ -789,7 +799,7 @@ export function assertArrayOnlyHasObjects<T = unknown>(x: unknown, message?: str
   assertArray<T>(x, message ?? `Expected array`);
   assert(
     (x as any[]).every((item) => typeof item === 'object' && item !== null && !Array.isArray(item)),
-    message ?? `Expected array to only contain objects`,
+    message ?? `Expected array to only contain objects`
   );
 }
 
@@ -798,7 +808,7 @@ export function assertArrayOnlyHasStrings<T = unknown>(x: unknown, message?: str
   assertArray<T>(x, message ?? `Expected array`);
   assert(
     (x as any[]).every((item) => typeof item === 'string'),
-    message ?? `Expected array to only contain strings`,
+    message ?? `Expected array to only contain strings`
   );
 }
 
@@ -807,7 +817,7 @@ export function assertArrayOnlyHasNumbers<T = unknown>(x: unknown, message?: str
   assertArray<T>(x, message ?? `Expected array`);
   assert(
     (x as any[]).every((item) => typeof item === 'number'),
-    message ?? `Expected array to only contain numbers`,
+    message ?? `Expected array to only contain numbers`
   );
 }
 
@@ -816,7 +826,7 @@ export function assertArrayEveryIsFalsy<T = unknown>(x: unknown, message?: strin
   assertArray<T>(x, message ?? `Expected array`);
   assert(
     (x as any[]).every((item) => !item),
-    message ?? `Expected every item to be falsy`,
+    message ?? `Expected every item to be falsy`
   );
 }
 
@@ -825,7 +835,7 @@ export function assertArrayEveryIsTruthy<T = unknown>(x: unknown, message?: stri
   assertArray<T>(x, message ?? `Expected array`);
   assert(
     (x as any[]).every((item) => !!item),
-    message ?? `Expected every item to be truthy`,
+    message ?? `Expected every item to be truthy`
   );
 }
 
@@ -849,7 +859,7 @@ export function assertHasKeys<O extends Record<string, unknown>, const K extends
   const r = obj as Record<string, unknown>;
   assert(
     keys.every((k) => k in r),
-    `Expected keys: ${keys.join(', ')}`,
+    `Expected keys: ${keys.join(', ')}`
   );
 }
 
@@ -872,7 +882,7 @@ export function assertAllKeysFalsy(obj: unknown, message?: string): asserts obj 
   assertObject(obj, message ?? `Expected object`);
   assert(
     Object.values(obj as Record<string, unknown>).every((v) => !v),
-    message ?? `Expected all keys to be falsy`,
+    message ?? `Expected all keys to be falsy`
   );
 }
 
@@ -882,7 +892,7 @@ export function assertAllKeysSet(obj: unknown, message?: string): asserts obj is
   const vals = Object.values(obj as Record<string, unknown>);
   assert(
     vals.every((v) => v !== null && v !== undefined),
-    message ?? `Expected all keys to be set (not null/undefined)`,
+    message ?? `Expected all keys to be set (not null/undefined)`
   );
 }
 
@@ -892,7 +902,7 @@ export function assertAnyKeyNull(obj: unknown, message?: string): asserts obj is
   const vals = Object.values(obj as Record<string, unknown>);
   assert(
     vals.some((v) => v === null),
-    message ?? `Expected any key to be null`,
+    message ?? `Expected any key to be null`
   );
 }
 
@@ -930,7 +940,7 @@ export function assertElementHasChildMatching(x: unknown, selector: string, mess
   const children = Array.from((el as any).children ?? []) as Element[];
   assert(
     children.some((c) => c.matches?.(selector)),
-    message ?? `Expected child matching "${selector}"`,
+    message ?? `Expected child matching "${selector}"`
   );
 }
 
@@ -1100,7 +1110,7 @@ export function assertObjectArrayAllHaveKey<T = Record<string, unknown>>(x: unkn
   assertArray<T>(x, message ?? `Expected array`);
   assert(
     (x as any[]).every((item) => typeof item === 'object' && item !== null && !Array.isArray(item) && key in (item as Record<string, unknown>)),
-    message ?? `Expected every object in array to have key "${key}"`,
+    message ?? `Expected every object in array to have key "${key}"`
   );
 }
 
@@ -1113,7 +1123,7 @@ export function assertObjectArrayEveryHasKeys<T = Record<string, unknown>>(x: un
       const r = item as Record<string, unknown>;
       return keys.every((k) => k in r);
     }),
-    `Expected every object in array to have keys: ${keys.join(', ')}`,
+    `Expected every object in array to have keys: ${keys.join(', ')}`
   );
 }
 
@@ -1447,10 +1457,7 @@ export function confirmAll(...assertions: (() => void)[]): { ok: boolean; errors
 export class ConfirmationBuilder {
   private assertions: (() => void)[] = [];
 
-  constructor(
-    private value: unknown,
-    initialAssertions: (() => void)[] = [],
-  ) {
+  constructor(private value: unknown, initialAssertions: (() => void)[] = []) {
     // Shallow copy to avoid accidental external mutation
     this.assertions = [...initialAssertions];
   }
@@ -1538,10 +1545,7 @@ export type Guard<V, V2 extends V = V> = (x: V) => asserts x is V2;
  */
 export class NarrowingBuilder<V> {
   private guards: Array<Guard<any, any>> = [];
-  constructor(
-    private value: V,
-    initialGuards: Array<Guard<any, any>> = [],
-  ) {
+  constructor(private value: V, initialGuards: Array<Guard<any, any>> = []) {
     this.guards = [...initialGuards];
   }
 
@@ -1621,7 +1625,7 @@ export class AssertChain<V> {
     return new AssertChain(
       this.builder.check((x: V): asserts x is V & string => {
         assertString(x as unknown);
-      }),
+      })
     );
   }
   // Alias: isString()
@@ -1634,7 +1638,7 @@ export class AssertChain<V> {
     return new AssertChain(
       this.builder.check((x: V): asserts x is V & number => {
         assertNumber(x as unknown);
-      }),
+      })
     );
   }
   // Alias: isNumber()
@@ -1647,7 +1651,7 @@ export class AssertChain<V> {
     return new AssertChain(
       this.builder.check((x: V): asserts x is V & boolean => {
         assertBoolean(x as unknown);
-      }),
+      })
     );
   }
   // Alias: isBoolean()
@@ -1660,7 +1664,7 @@ export class AssertChain<V> {
     return new AssertChain(
       this.builder.check((x: V): asserts x is V & unknown[] => {
         assertArray(x as unknown);
-      }),
+      })
     );
   }
   // Alias: isArray()
@@ -1673,7 +1677,7 @@ export class AssertChain<V> {
     return new AssertChain(
       this.builder.check((x: V): asserts x is V & Record<string, unknown> => {
         assertObject(x as unknown);
-      }),
+      })
     );
   }
   // Alias: isObject()
@@ -1686,7 +1690,7 @@ export class AssertChain<V> {
     return new AssertChain(
       this.builder.check((x: V): asserts x is V & Date => {
         assertDate(x as unknown);
-      }),
+      })
     );
   }
   // Alias: isDate()
@@ -1701,7 +1705,7 @@ export class AssertChain<V> {
     return new AssertChain(
       this.builder.check((x: V): asserts x is Exclude<V, undefined> => {
         assertDefined(x as any);
-      }),
+      })
     );
   }
   /** Assert that the value is not null. */
@@ -1709,7 +1713,7 @@ export class AssertChain<V> {
     return new AssertChain(
       this.builder.check((x: V): asserts x is Exclude<V, null> => {
         assertNonNull(x as any);
-      }),
+      })
     );
   }
   /** Assert that the value is neither null nor undefined. */
@@ -1717,7 +1721,7 @@ export class AssertChain<V> {
     return new AssertChain(
       this.builder.check((x: V): asserts x is Exclude<V, null | undefined> => {
         assertPresent(x as any);
-      }),
+      })
     );
   }
   /** Alias: value exists (not null/undefined). */
@@ -1731,7 +1735,7 @@ export class AssertChain<V> {
     return new AssertChain(
       this.builder.check((x: V): asserts x is V & InstanceType<C> => {
         assertInstanceOf(x as unknown, ctor);
-      }),
+      })
     );
   }
 
@@ -1741,7 +1745,7 @@ export class AssertChain<V> {
     return new AssertChain(
       this.builder.check((x: V): asserts x is V & string => {
         assertNonEmptyString(x as unknown);
-      }),
+      })
     );
   }
   // Alias: isNonEmptyString()
@@ -1754,7 +1758,7 @@ export class AssertChain<V> {
     return new AssertChain(
       this.builder.check((x: V): asserts x is V & string => {
         assertStringLengthAtLeast(x as unknown, n);
-      }),
+      })
     );
   }
   /** Assert that the string's length is <= n. */
@@ -1762,7 +1766,7 @@ export class AssertChain<V> {
     return new AssertChain(
       this.builder.check((x: V): asserts x is V & string => {
         assertStringLengthAtMost(x as unknown, n);
-      }),
+      })
     );
   }
   /** Assert that the string contains the given substring or matches regex. */
@@ -1770,7 +1774,7 @@ export class AssertChain<V> {
     return new AssertChain(
       this.builder.check((x: V): asserts x is V & string => {
         assertStringContains(x as unknown, needle);
-      }),
+      })
     );
   }
 
@@ -1780,7 +1784,7 @@ export class AssertChain<V> {
     return new AssertChain(
       this.builder.check((x: V): asserts x is V & unknown[] => {
         assertArrayNotEmpty(x as unknown);
-      }),
+      })
     );
   }
   // Alias: isNonEmptyArray()
@@ -1793,7 +1797,7 @@ export class AssertChain<V> {
     return new AssertChain(
       this.builder.check((x: V): asserts x is V & unknown[] => {
         assertArrayLength(x as unknown, len);
-      }),
+      })
     );
   }
 
