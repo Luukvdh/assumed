@@ -37,7 +37,8 @@
   "author": "Luuk van den Hoogen",
   "scripts": {
     "build": "tsc",
-    "build:browser": "esbuild src/assume.ts --bundle --minify --format=iife --global-name=Assumed --platform=browser --outfile=dist/assumed.browser.min.js",
+    "build:browser": "esbuild src/assume.ts --bundle --minify --format=iife --global-name=Assumed --platform=browser --outfile=dist/assumed.browser.min.mjs",
+    "build:browserassert": "esbuild src/assertroute.ts --bundle --minify --format=iife --global-name=assertroute --platform=browser --outfile=dist/assertroute.browser.min.mjs",
     "clean": "rimraf dist public/js"
   },
   "devDependencies": {

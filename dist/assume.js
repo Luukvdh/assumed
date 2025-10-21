@@ -1,19 +1,7 @@
 // ============================================================================
 // CORE TYPES AND ACTIVE CODE
 // ============================================================================
-const typeTagArray = [
-    "unknown",
-    "string",
-    "number",
-    "array",
-    "object",
-    "element",
-    "datetime",
-    "boolean",
-    "null",
-    "undefined",
-    "present",
-];
+const typeTagArray = ['unknown', 'string', 'number', 'array', 'object', 'element', 'datetime', 'boolean', 'null', 'undefined', 'present'];
 export class AssumingBus extends EventTarget {
     map = new Map();
     on(event, fn) {
@@ -66,55 +54,39 @@ export const assumingBus = new AssumingBus();
 function mergeOptions(base, patch) {
     if (patch == null)
         return base;
-    if (typeof patch === "string")
+    if (typeof patch === 'string')
         return { ...base, message: patch };
     return { ...base, ...patch };
 }
 export function assuming(...args) {
     let optionsRef = {
         quiet: false,
-        message: "Assumption failed",
+        message: 'Assumption failed',
     };
     // trailing message or options
     if (args.length) {
         const last = args[args.length - 1];
-        const isOptsObj = last &&
-            typeof last === "object" &&
-            typeof last !== "function" &&
-            typeof last !== "boolean";
-        if (typeof last === "string" || isOptsObj) {
+        const isOptsObj = last && typeof last === 'object' && typeof last !== 'function' && typeof last !== 'boolean';
+        if (typeof last === 'string' || isOptsObj) {
             optionsRef = mergeOptions(optionsRef, last);
             args.pop();
         }
     }
-    // normalize assumptions to callables; ignore null/undefined
-    // Also track original values from chains for eitherOr
+    let assumptions = args.filter((a) => a !== null && a !== undefined && typeof a !== 'string' && typeof a !== 'object');
     const originalValues = [];
-    const assumptions = args
-        .filter((a) => a != null && (typeof a === "function" || typeof a === "boolean"))
-        .map((a) => {
-        if (typeof a === "function") {
-            // Try to extract original value if this is an assumption chain (without running checks)
-            try {
-                const value = a.raw?.() ?? a.value?.();
-                if (value !== undefined)
-                    originalValues.push(value);
-            }
-            catch {
-                // Ignore if value() doesn't exist
-            }
-            return a;
-        }
-        return () => a;
-    });
     let error;
     let failed = false;
     try {
         for (const a of assumptions) {
-            const r = a(); // boolean | void; may throw
-            if (r === false) {
-                failed = true;
-                break;
+            if (typeof a === 'function') {
+                const r = a();
+            }
+            else if (typeof a === 'boolean') {
+                const r = a;
+                if (r === false) {
+                    failed = true;
+                    throw new Error(optionsRef.message);
+                }
             }
         }
     }
@@ -128,8 +100,8 @@ export function assuming(...args) {
         if (__emittedBetween)
             return;
         // Emit legacy names and new names for clarity
-        assumingBus.emit(failed ? "assuming:fail" : "assuming:pass");
-        assumingBus.emit(failed ? "assume:refuted" : "assume:vindicated");
+        assumingBus.emit(failed ? 'assuming:fail' : 'assuming:pass');
+        assumingBus.emit(failed ? 'assume:refuted' : 'assume:vindicated');
         if (!failed && optionsRef.emit) {
             assumingBus.emit(optionsRef.emit);
         }
@@ -141,34 +113,23 @@ export function assuming(...args) {
             }
             catch (e) {
                 // Don't break overall flow if predicate throws
-                console.error("emitOn predicate threw:", e);
+                console.error('emitOn predicate threw:', e);
             }
             if (shouldEmit) {
                 let payload;
                 try {
-                    payload = qe.data
-                        ? qe.data()
-                        : originalValues.length > 0
-                            ? originalValues[0]
-                            : undefined;
+                    payload = qe.data ? qe.data() : originalValues.length > 0 ? originalValues[0] : undefined;
                 }
                 catch (e) {
-                    console.error("emitOn data producer threw:", e);
+                    console.error('emitOn data producer threw:', e);
                 }
                 assumingBus.emit(qe.event, payload);
             }
         }
         __emittedBetween = true;
     };
-    if (failed && !optionsRef.quiet) {
-        const msg = optionsRef.message ??
-            (error instanceof Error ? error.message : "Assumption failed");
-        throw error instanceof Error ? error : new Error(msg);
-    }
     let lastResult; // capture last Run/result result
-    const buildMessage = (msg) => msg ??
-        optionsRef.message ??
-        (error instanceof Error ? error.message : "Assumptions not satisfied");
+    const buildMessage = (msg) => msg ?? optionsRef.message ?? (error instanceof Error ? error.message : 'Assumptions not satisfied');
     const api = {
         /**
          * Emit an event only when the assumptions pass (vindicated).
@@ -180,11 +141,7 @@ export function assuming(...args) {
             customEmits.push({
                 cond: () => !failed,
                 event,
-                data: data === undefined
-                    ? () => (originalValues.length > 0 ? originalValues[0] : undefined)
-                    : typeof data === "function"
-                        ? data
-                        : () => data,
+                data: data === undefined ? () => (originalValues.length > 0 ? originalValues[0] : undefined) : typeof data === 'function' ? data : () => data,
             });
             return api;
         },
@@ -198,11 +155,7 @@ export function assuming(...args) {
             customEmits.push({
                 cond: () => failed,
                 event,
-                data: data === undefined
-                    ? () => (originalValues.length > 0 ? originalValues[0] : undefined)
-                    : typeof data === "function"
-                        ? data
-                        : () => data,
+                data: data === undefined ? () => (originalValues.length > 0 ? originalValues[0] : undefined) : typeof data === 'function' ? data : () => data,
             });
             return api;
         },
@@ -223,14 +176,8 @@ export function assuming(...args) {
          * @param data Optional payload or () => payload. If omitted, the original chain value is used when available.
          */
         emitOn(condition, event, data) {
-            const condFn = typeof condition === "function"
-                ? condition
-                : () => !!condition;
-            const dataFn = data === undefined
-                ? () => (originalValues.length > 0 ? originalValues[0] : undefined)
-                : typeof data === "function"
-                    ? data
-                    : () => data;
+            const condFn = typeof condition === 'function' ? condition : () => !!condition;
+            const dataFn = data === undefined ? () => (originalValues.length > 0 ? originalValues[0] : undefined) : typeof data === 'function' ? data : () => data;
             customEmits.push({ cond: condFn, event, data: dataFn });
             return api; // FLUENT
         },
@@ -292,7 +239,7 @@ export function assuming(...args) {
          */
         unless(condition, fn) {
             ensureEmitted();
-            const cond = typeof condition === "function" ? !!condition() : !!condition;
+            const cond = typeof condition === 'function' ? !!condition() : !!condition;
             if (!cond)
                 lastResult = fn();
             return api; // FLUENT
@@ -334,7 +281,6 @@ export function assuming(...args) {
                 // Neither: assumptions threw error
                 return (lastResult = neither(error));
             }
-            return undefined;
         },
         // Branch helper (kept for convenience)
         /**
@@ -377,7 +323,7 @@ export function assuming(...args) {
 export function safeToAssume(...args) {
     try {
         // If single argument that looks like an assumption chain/function
-        if (args.length === 1 && typeof args[0] === "function") {
+        if (args.length === 1 && typeof args[0] === 'function') {
             // Single assumption chain: safeToAssume(that(x).isString())
             args[0](); // Execute the chain
             return true;
@@ -389,7 +335,7 @@ export function safeToAssume(...args) {
         }
     }
     catch (e) {
-        console.log("Well... that assumption turned out to be unfounded:", e.message);
+        console.log('Well... that assumption turned out to be unfounded:', e.message);
         return false;
     }
 }
@@ -404,16 +350,16 @@ function previewValue(v) {
     try {
         if (v === null || v === undefined)
             return String(v);
-        if (typeof v === "string")
-            return v.length > 120 ? v.slice(0, 117) + "..." : v;
-        if (typeof v === "number" || typeof v === "boolean")
+        if (typeof v === 'string')
+            return v.length > 120 ? v.slice(0, 117) + '...' : v;
+        if (typeof v === 'number' || typeof v === 'boolean')
             return String(v);
         if (Array.isArray(v))
             return `Array(${v.length})`;
-        if (typeof v === "object")
+        if (typeof v === 'object')
             return `{${Object.keys(v)
                 .slice(0, 6)
-                .join(",")}${Object.keys(v).length > 6 ? ",…" : ""}}`;
+                .join(',')}${Object.keys(v).length > 6 ? ',…' : ''}}`;
         return typeof v;
     }
     catch {
@@ -423,17 +369,15 @@ function previewValue(v) {
 export const captureLocation = (() => {
     const stack = new Error().stack;
     if (stack) {
-        const lines = stack.split("\n");
+        const lines = stack.split('\n');
         // Find first line that's not in assume.ts/assume.js
-        const relevantLine = lines.find((line) => line.includes("at ") &&
-            !line.includes("assume.js") &&
-            !line.includes("assume.ts"));
-        return relevantLine?.trim().replace("at ", "") || "unknown";
+        const relevantLine = lines.find((line) => line.includes('at ') && !line.includes('assume.js') && !line.includes('assume.ts'));
+        return relevantLine?.trim().replace('at ', '') || 'unknown';
     }
     return undefined;
 })();
 export class AssumptionError extends Error {
-    name = "AssumptionError";
+    name = 'AssumptionError';
     assumeStack;
     valuePreview;
     timestamp;
@@ -458,7 +402,7 @@ export class AssumptionError extends Error {
             parts.push(`Value: ${this.valuePreview}`);
         }
         if (this.chainTrace.length > 0) {
-            parts.push(`Chain: ${this.chainTrace.join(" → ")}`);
+            parts.push(`Chain: ${this.chainTrace.join(' → ')}`);
         }
         if (this.captureLocation) {
             parts.push(`Created at: ${this.captureLocation}`);
@@ -466,19 +410,16 @@ export class AssumptionError extends Error {
         if (inferenceText) {
             parts.push(inferenceText);
         }
-        return parts.join("\n  ");
+        return parts.join('\n  ');
     }
 }
 export function isAssumptionError(err) {
-    return (!!err && typeof err === "object" && err.name === "AssumptionError");
+    return !!err && typeof err === 'object' && err.name === 'AssumptionError';
 }
 function formatAssumptionError(err) {
-    const parts = [
-        `🔴 ${err.message}`,
-        `📊 Value: ${err.valuePreview || "unknown"}`,
-    ];
+    const parts = [`🔴 ${err.message}`, `📊 Value: ${err.valuePreview || 'unknown'}`];
     if (err.chainTrace.length > 0) {
-        parts.push(`🔗 Chain: ${err.chainTrace.join(" → ")}`);
+        parts.push(`🔗 Chain: ${err.chainTrace.join(' → ')}`);
     }
     if (err.captureLocation) {
         parts.push(`📍 Origin: ${err.captureLocation}`);
@@ -486,9 +427,9 @@ function formatAssumptionError(err) {
     // Show recent history for context
     const recentHistory = getAssumeHistory().slice(-3);
     if (recentHistory.length > 0) {
-        parts.push(`📜 Recent: ${recentHistory.map((ev) => `${ev.kind}${JSON.stringify(ev) || ""}`).join(" → ")}`);
+        parts.push(`📜 Recent: ${recentHistory.map((ev) => `${ev.kind}${JSON.stringify(ev) || ''}`).join(' → ')}`);
     }
-    return parts.join("\n   ");
+    return parts.join('\n   ');
 }
 function createAssumption(value) {
     const queue = [];
@@ -498,11 +439,9 @@ function createAssumption(value) {
         try {
             const stack = new Error().stack;
             if (stack) {
-                const lines = stack.split("\n");
-                const relevantLine = lines.find((line) => line.includes("at ") &&
-                    !line.includes("assume.js") &&
-                    !line.includes("assume.ts"));
-                return relevantLine?.trim().replace("at ", "") || "unknown";
+                const lines = stack.split('\n');
+                const relevantLine = lines.find((line) => line.includes('at ') && !line.includes('assume.js') && !line.includes('assume.ts'));
+                return relevantLine?.trim().replace('at ', '') || 'unknown';
             }
         }
         catch { }
@@ -511,23 +450,47 @@ function createAssumption(value) {
     // Capture where the chain was created
     pushAssumeEvent({
         t: Date.now(),
-        kind: "start",
+        kind: 'start',
         info: { valuePreview: previewValue(value) },
     });
+    let lastError;
     const runAll = () => {
         try {
             for (const c of queue)
                 c.check();
-            pushAssumeEvent({ t: Date.now(), kind: "vindicated" });
+            pushAssumeEvent({ t: Date.now(), kind: 'vindicated' });
             return true;
         }
         catch (e) {
-            // Don't throw - just return false to indicate failure
-            pushAssumeEvent({
-                t: Date.now(),
-                kind: "refuted",
-                info: { message: String(e) },
-            });
+            // remember the error so terminal methods can rethrow the original
+            lastError = e;
+            // Ensure we only emit a single refuted event per failure.
+            // If this is an AssumptionError, prefer its rich message.
+            const msg = isAssumptionError(e) ? e.message : String(e);
+            // Only push once per error instance
+            try {
+                if (isAssumptionError(e)) {
+                    const mark = e.__assume_event_pushed;
+                    if (!mark) {
+                        pushAssumeEvent({
+                            t: Date.now(),
+                            kind: 'refuted',
+                            info: { message: msg },
+                        });
+                        e.__assume_event_pushed = true;
+                    }
+                }
+                else {
+                    pushAssumeEvent({
+                        t: Date.now(),
+                        kind: 'refuted',
+                        info: { message: msg },
+                    });
+                }
+            }
+            catch (_) {
+                // Best-effort: ignore push failures
+            }
             return false;
         }
     };
@@ -536,15 +499,15 @@ function createAssumption(value) {
     };
     function getTypeName(val) {
         if (val === null)
-            return "null";
+            return 'null';
         if (Array.isArray(val))
-            return "Array";
-        if (typeof val === "object")
-            return val.constructor?.name || "Object";
+            return 'Array';
+        if (typeof val === 'object')
+            return val.constructor?.name || 'Object';
         return typeof val;
     }
     // Simplify the add function to use getTypeName:
-    const add = (fn, type = "unknown", methodName) => {
+    const add = (fn, type = 'unknown', methodName) => {
         // Add to readable trace using detected type
         if (methodName) {
             const detectedType = getTypeName(value);
@@ -555,32 +518,17 @@ function createAssumption(value) {
                 fn();
                 pushAssumeEvent({
                     t: Date.now(),
-                    kind: "check",
+                    kind: 'check',
                     info: { type, op: methodName },
                 });
             }
             catch (e) {
-                pushAssumeEvent({
-                    t: Date.now(),
-                    kind: "refuted",
-                    info: { message: String(e) },
-                });
-                //throw e;
                 // Build a brief inference report about the offending value
                 let inferenceText = undefined;
-                //try {
-                //  const results = report(value);
-                //  const pass = results.filter((r) => r.passed).map((r) => r.name);
-                //  const fail = results.filter((r) => !r.passed).map((r) => r.name);
-                //  const passShow = pass.slice(0, 4).join(", ");
-                //  const failShow = fail.slice(0, 3).join(", ");
-                //  const morePass = pass.length > 4 ? `, +${pass.length - 4} more` : "";
-                //  const moreFail = fail.length > 3 ? `, +${fail.length - 3} more` : "";
-                //  const passLine = passShow ? `Pass: [${passShow}${morePass}]` : "";
-                //  const failLine = failShow ? `Fail: [${failShow}${moreFail}]` : "";
-                //  const combined = [passLine, failLine].filter(Boolean).join("; ");
-                //  if (combined) inferenceText = `Inferred: ${combined}`;
-                //} catch {}
+                // try {
+                //   const results = report(value);
+                //   // derive inferenceText if needed
+                // } catch {}
                 const err = new AssumptionError(String(e), {
                     stack: queue.slice(),
                     value,
@@ -589,13 +537,7 @@ function createAssumption(value) {
                     captureLocation: creationLocation,
                     inferenceText,
                 });
-                // 📰 IMMEDIATE BULLETIN (no setImmediate)
-                console.log("📰 ASSUMPTION ERROR:", err.message);
-                pushAssumeEvent({
-                    t: Date.now(),
-                    kind: "refuted",
-                    info: { message: err.message },
-                });
+                // Throw and let the central runner (runAll) handle emitting a single refuted event
                 throw err;
             }
         };
@@ -620,7 +562,7 @@ function createAssumption(value) {
                 // Evaluate RHS condition
                 let rightOk = true;
                 try {
-                    if (typeof condition === "function") {
+                    if (typeof condition === 'function') {
                         const r = condition();
                         if (r === false)
                             rightOk = false;
@@ -634,22 +576,22 @@ function createAssumption(value) {
                     throw e;
                 }
                 if (!rightOk)
-                    throw new Error(msg ?? "Assumption failed (or)");
-            }, "unknown", "or");
+                    throw new Error(msg ?? 'Assumption failed (or)');
+            }, 'unknown', 'or');
             return runner;
         },
         andGuard(guard, msg) {
             add(() => {
                 if (!guard(value))
-                    throw new Error(msg ?? "Assumption failed (andGuard)");
-            }, "unknown", "andGuard");
+                    throw new Error(msg ?? 'Assumption failed (andGuard)');
+            }, 'unknown', 'andGuard');
             // Recast runner to the narrowed type for downstream specialized methods
             return runner;
         },
         and(condition, msg) {
             add(() => {
                 let ok = true;
-                if (typeof condition === "function") {
+                if (typeof condition === 'function') {
                     // Support passing another assumption chain or a plain predicate
                     const fn = condition;
                     try {
@@ -667,71 +609,69 @@ function createAssumption(value) {
                     ok = !!condition;
                 }
                 if (!ok)
-                    throw new Error(msg ?? "Assumption failed (and)");
-            }, "unknown", "and");
+                    throw new Error(msg ?? 'Assumption failed (and)');
+            }, 'unknown', 'and');
             return runner;
         },
         that(predicate, msg) {
             add(() => {
-                if (typeof predicate === "function") {
+                if (typeof predicate === 'function') {
                     if (!predicate(value))
-                        throw new Error(msg ?? "Assumption failed");
+                        throw new Error(msg ?? 'Assumption failed');
                 }
-                else if (typeof predicate === "boolean") {
+                else if (typeof predicate === 'boolean') {
                     if (!predicate)
-                        throw new Error(msg ?? "Assumption failed");
+                        throw new Error(msg ?? 'Assumption failed');
                 }
                 else {
-                    throw new Error("Predicate must be a function or boolean");
+                    throw new Error('Predicate must be a function or boolean');
                 }
-            }, "unknown", "that");
+            }, 'unknown', 'that');
             return runner;
         },
         instanceof(expectedOrMsg, msg) {
             // Detect if first param is a constructor or message
-            const isConstructorProvided = typeof expectedOrMsg === "function";
+            const isConstructorProvided = typeof expectedOrMsg === 'function';
             const actualMsg = isConstructorProvided ? msg : expectedOrMsg;
             if (isConstructorProvided) {
                 // With constructor - check instanceof and use smart TypeTag detection
                 const expected = expectedOrMsg;
                 add(() => {
                     if (!(value instanceof expected))
-                        throw new Error(actualMsg ??
-                            "Assumption failed: value is not instance of expected");
+                        throw new Error(actualMsg ?? 'Assumption failed: value is not instance of expected');
                 }, 
                 // Smart TypeTag detection from your typeTagArray lookup
-                (typeTagArray.find((x) => x === getTypeName(value)) ||
-                    typeTagArray.find((x) => x === typeof value) ||
-                    "unknown"), `instanceof(${expected.name || "Constructor"})`);
+                (typeTagArray.find((x) => x === getTypeName(value)) || typeTagArray.find((x) => x === typeof value) || 'unknown'), `instanceof(${expected.name || 'Constructor'})`);
                 return runner;
             }
             else {
                 // Empty instanceof - confidence check, detect current type
                 add(() => {
                     // Just verify it's some kind of constructor instance
-                    if (typeof value !== "object" || value === null) {
-                        throw new Error(actualMsg ?? "Expected constructor instance");
+                    if (typeof value !== 'object' || value === null) {
+                        throw new Error(actualMsg ?? 'Expected constructor instance');
                     }
                 }, 
                 // Smart TypeTag detection using your existing logic
-                (typeTagArray.find((x) => x === getTypeName(value)) ||
-                    typeTagArray.find((x) => x === typeof value) ||
-                    "unknown"), `instanceof('base')`);
+                (typeTagArray.find((x) => x === getTypeName(value)) || typeTagArray.find((x) => x === typeof value) || 'unknown'), `instanceof('base')`);
                 return runner;
             }
         },
         equals(expected, msg) {
             add(() => {
                 if (value !== expected)
-                    throw new Error(msg ?? "Assumption failed: value !== expected");
-            }, "unknown", `equals(${JSON.stringify(expected)})`);
+                    throw new Error(msg ?? 'Assumption failed: value !== expected');
+            }, 'unknown', `equals(${JSON.stringify(expected)})`);
             return runner;
         },
         /** Run queued checks and return the value if they pass; throw on failure. */
         value() {
             const ok = runner();
-            if (!ok)
-                throw new Error("Assumption failed");
+            if (!ok) {
+                if (lastError)
+                    throw lastError;
+                throw new Error('Assumption failed');
+            }
             return value;
         },
         /** Alias for value() for backward compatibility. */
@@ -742,7 +682,7 @@ function createAssumption(value) {
     Object.assign(runner, base);
     // Natural terminal: property getter that runs the checks and returns the value
     // Usage: const v = that(x).isString().trimmedNotEmpty.it
-    Object.defineProperty(runner, "it", {
+    Object.defineProperty(runner, 'it', {
         get() {
             return runner.value();
         },
@@ -751,7 +691,7 @@ function createAssumption(value) {
     });
     // Ultra-short terminal: same as .it but terser to type.
     // Usage: const v = that(x).isString().trimmedNotEmpty.$
-    Object.defineProperty(runner, "$", {
+    Object.defineProperty(runner, '$', {
         get() {
             return runner.value();
         },
@@ -767,28 +707,28 @@ function createAssumption(value) {
             add(() => {
                 if (!(value > n))
                     throw new Error(msg ?? `Expected > ${n}`);
-            }, "number", `greaterThan(${n})`);
+            }, 'number', `greaterThan(${n})`);
             return runner;
         },
         greaterOrEqual(n, msg) {
             add(() => {
                 if (!(value >= n))
                     throw new Error(msg ?? `Expected >= ${n}`);
-            }, "number", `greaterOrEqual(${n})`);
+            }, 'number', `greaterOrEqual(${n})`);
             return runner;
         },
         lessThan(n, msg) {
             add(() => {
                 if (!(value < n))
                     throw new Error(msg ?? `Expected < ${n}`);
-            }, "number", `lessThan(${n})`);
+            }, 'number', `lessThan(${n})`);
             return runner;
         },
         lessOrEqual(n, msg) {
             add(() => {
                 if (!(value <= n))
                     throw new Error(msg ?? `Expected <= ${n}`);
-            }, "number", `lessOrEqual(${n})`);
+            }, 'number', `lessOrEqual(${n})`);
             return runner;
         },
         between(min, max, msg) {
@@ -796,7 +736,7 @@ function createAssumption(value) {
                 const v = value;
                 if (!(v >= min && v <= max))
                     throw new Error(msg ?? `Expected between ${min} and ${max}`);
-            }, "number", `between(${min},${max})`);
+            }, 'number', `between(${min},${max})`);
             return runner;
         },
     });
@@ -804,8 +744,8 @@ function createAssumption(value) {
         notEmpty(msg) {
             add(() => {
                 if (String(value).length === 0)
-                    throw new Error(msg ?? "Expected non-empty string");
-            }, "string", "notEmpty");
+                    throw new Error(msg ?? 'Expected non-empty string');
+            }, 'string', 'notEmpty');
             return runner;
         },
         // New canonical names
@@ -813,21 +753,21 @@ function createAssumption(value) {
             add(() => {
                 if (String(value).length !== len)
                     throw new Error(msg ?? `Expected length ${len}`);
-            }, "string", `lengthMustBe(${len})`);
+            }, 'string', `lengthMustBe(${len})`);
             return runner;
         },
         lengthAtLeast(n, msg) {
             add(() => {
                 if (String(value).length < n)
                     throw new Error(msg ?? `Expected length >= ${n}`);
-            }, "string", `lengthAtLeast(${n})`);
+            }, 'string', `lengthAtLeast(${n})`);
             return runner;
         },
         lengthAtMost(n, msg) {
             add(() => {
                 if (String(value).length > n)
                     throw new Error(msg ?? `Expected length <= ${n}`);
-            }, "string", `lengthAtMost(${n})`);
+            }, 'string', `lengthAtMost(${n})`);
             return runner;
         },
         // Deprecated aliases
@@ -845,60 +785,60 @@ function createAssumption(value) {
                 const l = String(value).length;
                 if (l < min || l > max)
                     throw new Error(msg ?? `Expected length between ${min} and ${max}`);
-            }, "string", `lengthBetween(${min},${max})`);
+            }, 'string', `lengthBetween(${min},${max})`);
             return runner;
         },
         contains(needle, msg) {
             add(() => {
                 const s = String(value);
-                const ok = typeof needle === "string" ? s.includes(needle) : needle.test(s);
+                const ok = typeof needle === 'string' ? s.includes(needle) : needle.test(s);
                 if (!ok)
                     throw new Error(msg ?? `Expected to contain ${String(needle)}`);
-            }, "string", `contains(${typeof needle === "string" ? `"${needle}"` : needle.toString()})`);
+            }, 'string', `contains(${typeof needle === 'string' ? `"${needle}"` : needle.toString()})`);
             return runner;
         },
         startsWith(prefix, msg) {
             add(() => {
                 if (!String(value).startsWith(prefix))
                     throw new Error(msg ?? `Expected to start with "${prefix}"`);
-            }, "string", `startsWith("${prefix}")`);
+            }, 'string', `startsWith("${prefix}")`);
             return runner;
         },
         endsWith(suffix, msg) {
             add(() => {
                 if (!String(value).endsWith(suffix))
                     throw new Error(msg ?? `Expected to end with "${suffix}"`);
-            }, "string", `endsWith("${suffix}")`);
+            }, 'string', `endsWith("${suffix}")`);
             return runner;
         },
         matches(re, msg) {
             add(() => {
                 if (!re.test(String(value)))
                     throw new Error(msg ?? `Expected to match ${re}`);
-            }, "string", `matches(${re.toString()})`);
+            }, 'string', `matches(${re.toString()})`);
             return runner;
         },
         equalsIgnoreCase(expected, msg) {
             add(() => {
                 if (String(value).toLowerCase() !== expected.toLowerCase())
                     throw new Error(msg ?? `Expected "${expected}" (case-insensitive)`);
-            }, "string", `equalsIgnoreCase("${expected}")`);
+            }, 'string', `equalsIgnoreCase("${expected}")`);
             return runner;
         },
         includesAny(...needles) {
             add(() => {
                 const s = String(value);
                 if (!needles.some((n) => s.includes(n)))
-                    throw new Error(`Expected any of [${needles.join(", ")}]`);
-            }, "string", `includesAny(${needles.map((n) => `"${n}"`).join(",")})`);
+                    throw new Error(`Expected any of [${needles.join(', ')}]`);
+            }, 'string', `includesAny(${needles.map((n) => `"${n}"`).join(',')})`);
             return runner;
         },
         includesAll(...needles) {
             add(() => {
                 const s = String(value);
                 if (!needles.every((n) => s.includes(n)))
-                    throw new Error(`Expected all of [${needles.join(", ")}]`);
-            }, "string", `includesAll(${needles.map((n) => `"${n}"`).join(",")})`);
+                    throw new Error(`Expected all of [${needles.join(', ')}]`);
+            }, 'string', `includesAll(${needles.map((n) => `"${n}"`).join(',')})`);
             return runner;
         },
         isJSON(msg) {
@@ -907,9 +847,9 @@ function createAssumption(value) {
                     JSON.parse(String(value));
                 }
                 catch {
-                    throw new Error(msg ?? "Expected valid JSON");
+                    throw new Error(msg ?? 'Expected valid JSON');
                 }
-            }, "string", "isJSON");
+            }, 'string', 'isJSON');
             return runner;
         },
         /**
@@ -918,8 +858,8 @@ function createAssumption(value) {
         trimmedNotEmpty(msg) {
             add(() => {
                 if (String(value).trim().length === 0)
-                    throw new Error(msg ?? "Expected non-empty (trimmed)");
-            }, "string", "trimmedNotEmpty");
+                    throw new Error(msg ?? 'Expected non-empty (trimmed)');
+            }, 'string', 'trimmedNotEmpty');
             return runner;
         },
     });
@@ -928,7 +868,7 @@ function createAssumption(value) {
             add(() => {
                 if (value.length !== len)
                     throw new Error(msg ?? `Expected array length ${len}`);
-            }, "array", `lengthMustBe(${len})`);
+            }, 'array', `lengthMustBe(${len})`);
             return runner;
         },
         // Deprecated alias
@@ -938,8 +878,8 @@ function createAssumption(value) {
         notEmpty(msg) {
             add(() => {
                 if (value.length === 0)
-                    throw new Error(msg ?? "Expected non-empty array");
-            }, "array", "notEmpty");
+                    throw new Error(msg ?? 'Expected non-empty array');
+            }, 'array', 'notEmpty');
             return runner;
         },
         hasAnyOf(items, msg) {
@@ -949,18 +889,18 @@ function createAssumption(value) {
                 const set = new Set(items);
                 const ok = arr.some((el) => set.has(String(el)) || set.has(el));
                 if (!ok)
-                    throw new Error(msg ?? `Expected array to contain any of [${items.join(", ")}]`);
-            }, "array", `hasAnyOf([${items.length}])`);
+                    throw new Error(msg ?? `Expected array to contain any of [${items.join(', ')}]`);
+            }, 'array', `hasAnyOf([${items.length}])`);
             return runner;
         },
         hasEveryOf(items, msg) {
             add(() => {
                 const arr = value;
-                const set = new Set(arr.map((x) => (typeof x === "string" ? x : String(x))));
+                const set = new Set(arr.map((x) => (typeof x === 'string' ? x : String(x))));
                 const missing = items.filter((k) => !set.has(k));
                 if (missing.length > 0)
-                    throw new Error(msg ?? `Missing required items: [${missing.join(", ")}]`);
-            }, "array", `hasEveryOf([${items.length}])`);
+                    throw new Error(msg ?? `Missing required items: [${missing.join(', ')}]`);
+            }, 'array', `hasEveryOf([${items.length}])`);
             return runner;
         },
         hasAllOf(items, msg) {
@@ -969,96 +909,94 @@ function createAssumption(value) {
         },
         itemIsBoolean(i, msg) {
             add(() => {
-                if (typeof value[i] !== "boolean")
+                if (typeof value[i] !== 'boolean')
                     throw new Error(msg ?? `Expected boolean at ${i}`);
-            }, "array", `itemIsBoolean(${i})`);
+            }, 'array', `itemIsBoolean(${i})`);
             return runner;
         },
         itemIsString(i, msg) {
             add(() => {
-                if (typeof value[i] !== "string")
+                if (typeof value[i] !== 'string')
                     throw new Error(msg ?? `Expected string at ${i}`);
-            }, "array", `itemIsString(${i})`);
+            }, 'array', `itemIsString(${i})`);
             return runner;
         },
         itemIsNumber(i, msg) {
             add(() => {
-                if (typeof value[i] !== "number")
+                if (typeof value[i] !== 'number')
                     throw new Error(msg ?? `Expected number at ${i}`);
-            }, "array", `itemIsNumber(${i})`);
+            }, 'array', `itemIsNumber(${i})`);
             return runner;
         },
         itemIsObject(i, msg) {
             add(() => {
                 const v = value[i];
-                if (typeof v !== "object" || v === null || Array.isArray(v))
+                if (typeof v !== 'object' || v === null || Array.isArray(v))
                     throw new Error(msg ?? `Expected object at ${i}`);
-            }, "array", `itemIsObject(${i})`);
+            }, 'array', `itemIsObject(${i})`);
             return runner;
         },
         includesString(needle, msg) {
             add(() => {
                 if (!value.some((item) => String(item).includes(needle)))
                     throw new Error(msg ?? `Expected string including "${needle}"`);
-            }, "array", `includesString("${needle}")`);
+            }, 'array', `includesString("${needle}")`);
             return runner;
         },
         includesNumber(needle, msg) {
             add(() => {
                 if (!value.some((item) => item === needle))
                     throw new Error(msg ?? `Expected number including "${needle}"`);
-            }, "array", `includesNumber(${needle})`);
+            }, 'array', `includesNumber(${needle})`);
             return runner;
         },
         includesObject(needle, msg) {
             add(() => {
                 if (!value.some((item) => JSON.stringify(item) === JSON.stringify(needle)))
                     throw new Error(msg ?? `Expected object including "${JSON.stringify(needle)}"`);
-            }, "array", `includesObject(${JSON.stringify(needle)})`);
+            }, 'array', `includesObject(${JSON.stringify(needle)})`);
             return runner;
         },
         onlyHasObjects(msg) {
             add(() => {
-                if (!value.every((item) => typeof item === "object" &&
-                    item !== null &&
-                    !Array.isArray(item)))
-                    throw new Error(msg ?? "Expected all objects");
-            }, "array", "onlyHasObjects");
+                if (!value.every((item) => typeof item === 'object' && item !== null && !Array.isArray(item)))
+                    throw new Error(msg ?? 'Expected all objects');
+            }, 'array', 'onlyHasObjects');
             return runner;
         },
         onlyHasStrings(msg) {
             add(() => {
-                if (!value.every((item) => typeof item === "string"))
-                    throw new Error(msg ?? "Expected all strings");
-            }, "array", "onlyHasStrings");
+                if (!value.every((item) => typeof item === 'string'))
+                    throw new Error(msg ?? 'Expected all strings');
+            }, 'array', 'onlyHasStrings');
             return runner;
         },
         onlyHasNumbers(msg) {
             add(() => {
-                if (!value.every((item) => typeof item === "number"))
-                    throw new Error(msg ?? "Expected all numbers");
-            }, "array", "onlyHasNumbers");
+                if (!value.every((item) => typeof item === 'number'))
+                    throw new Error(msg ?? 'Expected all numbers');
+            }, 'array', 'onlyHasNumbers');
             return runner;
         },
         everyIsFalsy(msg) {
             add(() => {
                 if (!value.every((item) => !item))
-                    throw new Error(msg ?? "Expected all falsy");
-            }, "array", "everyIsFalsy");
+                    throw new Error(msg ?? 'Expected all falsy');
+            }, 'array', 'everyIsFalsy');
             return runner;
         },
         everyIsTruthy(msg) {
             add(() => {
                 if (!value.every((item) => !!item))
-                    throw new Error(msg ?? "Expected all truthy");
-            }, "array", "everyIsTruthy");
+                    throw new Error(msg ?? 'Expected all truthy');
+            }, 'array', 'everyIsTruthy');
             return runner;
         },
         includesCondition(needle, msg) {
             add(() => {
                 if (!value.some(needle))
-                    throw new Error(msg ?? "Expected array to include condition");
-            }, "array", "includesCondition");
+                    throw new Error(msg ?? 'Expected array to include condition');
+            }, 'array', 'includesCondition');
             return runner;
         },
     });
@@ -1067,7 +1005,7 @@ function createAssumption(value) {
             add(() => {
                 if (!(key in value))
                     throw new Error(msg ?? `Expected key "${key}"`);
-            }, "object", `hasKey("${key}")`);
+            }, 'object', `hasKey("${key}")`);
             return runner;
         },
         hasKeys(...keys) {
@@ -1075,14 +1013,14 @@ function createAssumption(value) {
                 for (const k of keys)
                     if (!(k in value))
                         throw new Error(`Expected key "${k}"`);
-            }, "object", `hasKeys(${keys.map((k) => `"${k}"`).join(",")})`);
+            }, 'object', `hasKeys(${keys.map((k) => `"${k}"`).join(',')})`);
             return runner;
         },
         keyEquals(key, expected, msg) {
             add(() => {
                 if (value[key] !== expected)
                     throw new Error(msg ?? `Expected ${key} === ${String(expected)}`);
-            }, "object", `keyEquals("${key}",${JSON.stringify(expected)})`);
+            }, 'object', `keyEquals("${key}",${JSON.stringify(expected)})`);
             return runner;
         },
         sameKeys(expected, msg) {
@@ -1090,11 +1028,11 @@ function createAssumption(value) {
                 const a = Object.keys(value);
                 const b = Object.keys(expected);
                 if (a.length !== b.length)
-                    throw new Error(msg ?? "Key count mismatch");
+                    throw new Error(msg ?? 'Key count mismatch');
                 for (const k of b)
                     if (!(k in value))
                         throw new Error(msg ?? `Missing key "${k}"`);
-            }, "object", "sameKeys");
+            }, 'object', 'sameKeys');
             return runner;
         },
         allKeysFalsy(msg) {
@@ -1102,7 +1040,7 @@ function createAssumption(value) {
                 for (const k in value)
                     if (value[k])
                         throw new Error(msg ?? `Key "${k}" not falsy`);
-            }, "object", "allKeysFalsy");
+            }, 'object', 'allKeysFalsy');
             return runner;
         },
         allKeysSet(msg) {
@@ -1110,7 +1048,7 @@ function createAssumption(value) {
                 for (const k in value)
                     if (value[k] === undefined)
                         throw new Error(msg ?? `Key "${k}" unset`);
-            }, "object", "allKeysSet");
+            }, 'object', 'allKeysSet');
             return runner;
         },
         anyKeyNull(msg) {
@@ -1122,8 +1060,8 @@ function createAssumption(value) {
                         break;
                     }
                 if (!f)
-                    throw new Error(msg ?? "No null key");
-            }, "object", "anyKeyNull");
+                    throw new Error(msg ?? 'No null key');
+            }, 'object', 'anyKeyNull');
             return runner;
         },
     });
@@ -1131,61 +1069,49 @@ function createAssumption(value) {
         hasChildren(msg) {
             add(() => {
                 const e = value;
-                if (typeof Element === "undefined" ||
-                    !(e instanceof Element) ||
-                    e.childElementCount === 0)
-                    throw new Error(msg ?? "Expected child elements");
-            }, "element", "hasChildren");
+                if (typeof Element === 'undefined' || !(e instanceof Element) || e.childElementCount === 0)
+                    throw new Error(msg ?? 'Expected child elements');
+            }, 'element', 'hasChildren');
             return runner;
         },
         hasChild(msg) {
             add(() => {
                 const e = value;
-                if (typeof Element === "undefined" ||
-                    !(e instanceof Element) ||
-                    e.childElementCount === 0)
-                    throw new Error(msg ?? "Expected child elements");
-            }, "element", "hasChild");
+                if (typeof Element === 'undefined' || !(e instanceof Element) || e.childElementCount === 0)
+                    throw new Error(msg ?? 'Expected child elements');
+            }, 'element', 'hasChild');
             return runner;
         },
         hasChildMatching(sel, msg) {
             add(() => {
                 const e = value;
-                if (typeof Element === "undefined" ||
-                    !(e instanceof Element) ||
-                    !e.querySelector(sel))
+                if (typeof Element === 'undefined' || !(e instanceof Element) || !e.querySelector(sel))
                     throw new Error(msg ?? `Missing child "${sel}"`);
-            }, "element", `hasChildMatching("${sel}")`);
+            }, 'element', `hasChildMatching("${sel}")`);
             return runner;
         },
         hasDescendant(sel, msg) {
             add(() => {
                 const e = value;
-                if (typeof Element === "undefined" ||
-                    !(e instanceof Element) ||
-                    !e.querySelector(sel))
+                if (typeof Element === 'undefined' || !(e instanceof Element) || !e.querySelector(sel))
                     throw new Error(msg ?? `Missing descendant "${sel}"`);
-            }, "element", `hasDescendant("${sel}")`);
+            }, 'element', `hasDescendant("${sel}")`);
             return runner;
         },
         hasAttribute(name, msg) {
             add(() => {
                 const e = value;
-                if (typeof Element === "undefined" ||
-                    !(e instanceof Element) ||
-                    !e.hasAttribute(name))
+                if (typeof Element === 'undefined' || !(e instanceof Element) || !e.hasAttribute(name))
                     throw new Error(msg ?? `Missing attribute "${name}"`);
-            }, "element", `hasAttribute("${name}")`);
+            }, 'element', `hasAttribute("${name}")`);
             return runner;
         },
         attributeEquals(name, expected, msg) {
             add(() => {
                 const e = value;
-                if (typeof Element === "undefined" ||
-                    !(e instanceof Element) ||
-                    e.getAttribute(name) !== expected)
+                if (typeof Element === 'undefined' || !(e instanceof Element) || e.getAttribute(name) !== expected)
                     throw new Error(msg ?? `Attr "${name}" != "${expected}"`);
-            }, "element", `attributeEquals("${name}","${expected}")`);
+            }, 'element', `attributeEquals("${name}","${expected}")`);
             return runner;
         },
     });
@@ -1199,9 +1125,9 @@ function createAssumption(value) {
      */
     runner.isNumber = (msg) => {
         add(() => {
-            if (typeof value !== "number")
-                throw new Error(msg ?? "Expected number");
-        }, "number", "isNumber");
+            if (typeof value !== 'number')
+                throw new Error(msg ?? 'Expected number');
+        }, 'number', 'isNumber');
         return toNumberChain();
     };
     /**
@@ -1212,9 +1138,9 @@ function createAssumption(value) {
      */
     runner.isString = (msg) => {
         add(() => {
-            if (typeof value !== "string")
-                throw new Error(msg ?? "Expected string");
-        }, "string", "isString");
+            if (typeof value !== 'string')
+                throw new Error(msg ?? 'Expected string');
+        }, 'string', 'isString');
         return toStringChain();
     };
     /**
@@ -1225,8 +1151,8 @@ function createAssumption(value) {
     runner.isArray = (msg) => {
         add(() => {
             if (!Array.isArray(value))
-                throw new Error(msg ?? "Expected array");
-        }, "array", "isArray");
+                throw new Error(msg ?? 'Expected array');
+        }, 'array', 'isArray');
         return toArrayChain();
     };
     /**
@@ -1236,9 +1162,9 @@ function createAssumption(value) {
      */
     runner.isObject = (msg) => {
         add(() => {
-            if (typeof value !== "object" || value === null || Array.isArray(value))
-                throw new Error(msg ?? "Expected object");
-        }, "object", "isObject");
+            if (typeof value !== 'object' || value === null || Array.isArray(value))
+                throw new Error(msg ?? 'Expected object');
+        }, 'object', 'isObject');
         return toObjectChain();
     };
     /**
@@ -1248,10 +1174,9 @@ function createAssumption(value) {
      */
     runner.isElement = (msg) => {
         add(() => {
-            if (typeof Element === "undefined" ||
-                !(value instanceof Element))
-                throw new Error(msg ?? "Expected Element");
-        }, "element", "isElement");
+            if (typeof Element === 'undefined' || !(value instanceof Element))
+                throw new Error(msg ?? 'Expected Element');
+        }, 'element', 'isElement');
         return toElementChain();
     };
     // Date guard and chain
@@ -1263,8 +1188,8 @@ function createAssumption(value) {
     runner.isDate = (msg) => {
         add(() => {
             if (!(value instanceof Date))
-                throw new Error(msg ?? "Expected Date instance");
-        }, "datetime", "isDate");
+                throw new Error(msg ?? 'Expected Date instance');
+        }, 'datetime', 'isDate');
         return toDateChain();
     };
     /**
@@ -1273,9 +1198,9 @@ function createAssumption(value) {
      */
     runner.isBoolean = (msg) => {
         add(() => {
-            if (typeof value !== "boolean")
-                throw new Error(msg ?? "Expected boolean");
-        }, "boolean", "isBoolean");
+            if (typeof value !== 'boolean')
+                throw new Error(msg ?? 'Expected boolean');
+        }, 'boolean', 'isBoolean');
         return runner;
     };
     // Nullish guards producing terminal states
@@ -1286,8 +1211,8 @@ function createAssumption(value) {
     runner.isNull = (msg) => {
         add(() => {
             if (value !== null)
-                throw new Error(msg ?? "Expected null");
-        }, "null", "isNull");
+                throw new Error(msg ?? 'Expected null');
+        }, 'null', 'isNull');
         return runner;
     };
     /**
@@ -1297,8 +1222,8 @@ function createAssumption(value) {
     runner.isUndefined = (msg) => {
         add(() => {
             if (value !== undefined)
-                throw new Error(msg ?? "Expected undefined");
-        }, "undefined", "isUndefined");
+                throw new Error(msg ?? 'Expected undefined');
+        }, 'undefined', 'isUndefined');
         return runner;
     };
     // Non‑nullish guards that KEEP other type guards (move to 'present')
@@ -1310,8 +1235,8 @@ function createAssumption(value) {
     runner.notNil = (msg) => {
         add(() => {
             if (value === null || value === undefined)
-                throw new Error(msg ?? "Expected value (not null/undefined)");
-        }, "present", "notNil");
+                throw new Error(msg ?? 'Expected value (not null/undefined)');
+        }, 'present', 'notNil');
         return runner;
     };
     /**
@@ -1321,8 +1246,8 @@ function createAssumption(value) {
     runner.notNull = (msg) => {
         add(() => {
             if (value === null)
-                throw new Error(msg ?? "Expected not null");
-        }, "present", "notNull");
+                throw new Error(msg ?? 'Expected not null');
+        }, 'present', 'notNull');
         return runner;
     };
     /**
@@ -1333,8 +1258,8 @@ function createAssumption(value) {
     runner.notNullOrUndefined = (msg) => {
         add(() => {
             if (value === null || value === undefined)
-                throw new Error(msg ?? "Expected value (not null/undefined)");
-        }, "present", "notNullOrUndefined");
+                throw new Error(msg ?? 'Expected value (not null/undefined)');
+        }, 'present', 'notNullOrUndefined');
         return runner;
     };
     return runner;
@@ -1344,19 +1269,19 @@ function createAssumption(value) {
             earlier(than, msg) {
                 add(() => {
                     const v = value.getTime();
-                    const t = typeof than === "number" ? than : than.getTime();
+                    const t = typeof than === 'number' ? than : than.getTime();
                     if (!(v < t))
                         throw new Error(msg ?? `Expected earlier than ${new Date(t).toISOString()}`);
-                }, "datetime", `earlier(${typeof than === "number" ? than : than.toISOString()})`);
+                }, 'datetime', `earlier(${typeof than === 'number' ? than : than.toISOString()})`);
                 return runner;
             },
             later(than, msg) {
                 add(() => {
                     const v = value.getTime();
-                    const t = typeof than === "number" ? than : than.getTime();
+                    const t = typeof than === 'number' ? than : than.getTime();
                     if (!(v > t))
                         throw new Error(msg ?? `Expected later than ${new Date(t).toISOString()}`);
-                }, "datetime", `later(${typeof than === "number" ? than : than.toISOString()})`);
+                }, 'datetime', `later(${typeof than === 'number' ? than : than.toISOString()})`);
                 return runner;
             },
             isYear(year, msg) {
@@ -1364,16 +1289,16 @@ function createAssumption(value) {
                     const y = value.getFullYear();
                     if (y !== year)
                         throw new Error(msg ?? `Expected year ${year}`);
-                }, "datetime", `isYear(${year})`);
+                }, 'datetime', `isYear(${year})`);
                 return runner;
             },
             wasBefore(than, msg) {
                 add(() => {
                     const v = value.getTime();
-                    const t = typeof than === "number" ? than : than.getTime();
+                    const t = typeof than === 'number' ? than : than.getTime();
                     if (!(v < t))
                         throw new Error(msg ?? `Expected before ${new Date(t).toISOString()}`);
-                }, "datetime", `wasBefore(${typeof than === "number" ? than : than.toISOString()})`);
+                }, 'datetime', `wasBefore(${typeof than === 'number' ? than : than.toISOString()})`);
                 return runner;
             },
             daysAgoExceeds(n, msg) {
@@ -1383,7 +1308,7 @@ function createAssumption(value) {
                     const days = (now - then) / (1000 * 60 * 60 * 24);
                     if (!(days > n))
                         throw new Error(msg ?? `Expected more than ${n} days ago`);
-                }, "datetime", `daysAgoExceeds(${n})`);
+                }, 'datetime', `daysAgoExceeds(${n})`);
                 return runner;
             },
             daysSinceAtLeast(n, msg) {
@@ -1393,7 +1318,7 @@ function createAssumption(value) {
                     const days = (now - then) / (1000 * 60 * 60 * 24);
                     if (!(days >= n))
                         throw new Error(msg ?? `Expected at least ${n} days since`);
-                }, "datetime", `daysSinceAtLeast(${n})`);
+                }, 'datetime', `daysSinceAtLeast(${n})`);
                 return runner;
             },
         });
@@ -1421,16 +1346,16 @@ export function setAssumeHistoryLimit(n) {
     ASSUME_HISTORY_LIMIT = Math.max(0, n | 0);
 }
 function getFnName(fn) {
-    return fn.displayName || fn.name || "anonymous";
+    return fn.displayName || fn.name || 'anonymous';
 }
 function enrichWithHandlerName(err, handler) {
     const name = getFnName(handler);
-    if (err && typeof err === "object") {
+    if (err && typeof err === 'object') {
         try {
             // attach meta
             err.handlerName = name;
             // prefix message for visibility
-            if (err.message && typeof err.message === "string") {
+            if (err.message && typeof err.message === 'string') {
                 err.message = `[${name}] ${err.message}`;
             }
         }
@@ -1450,7 +1375,7 @@ export function defRefHandler(def, log = false) {
         console.error(err);
         enrichWithHandlerName(err, defRefHandler);
         if (log)
-            (typeof log === "function" ? log : console.error)(err);
+            (typeof log === 'function' ? log : console.error)(err);
         // Always return default - don't re-throw
         return def;
     };
@@ -1466,7 +1391,7 @@ export function defRefHandlerAsync(def, log = false) {
         enrichWithHandlerName(err, defRefHandlerAsync);
         console.error(err);
         if (log)
-            (typeof log === "function" ? log : console.error)(err);
+            (typeof log === 'function' ? log : console.error)(err);
         return def;
     };
 }
@@ -1493,7 +1418,7 @@ export function assumedRoute(def, handler, log = false) {
         try {
             const out = handler(...args);
             // Async path: attach a default-returning catch
-            if (out && typeof out.then === "function") {
+            if (out && typeof out.then === 'function') {
                 const onErr = defRefHandlerAsync(def, log);
                 return out.catch((e) => onErr(enrichWithHandlerName(e, handler)));
             }
@@ -1503,7 +1428,7 @@ export function assumedRoute(def, handler, log = false) {
         catch (e) {
             // If the handler is an async function and threw before returning a Promise,
             // return a Promise of the default value using the async refute handler.
-            const isAsyncFn = handler?.constructor?.name === "AsyncFunction";
+            const isAsyncFn = handler?.constructor?.name === 'AsyncFunction';
             if (isAsyncFn) {
                 const onErrAsync = defRefHandlerAsync(def, log);
                 return onErrAsync(enrichWithHandlerName(e, handler));
@@ -1650,7 +1575,7 @@ export function assertStringIsJSON(v, msg) {
 export function assertStringOneOf(v, options, msg) {
     assuming(that(v)
         .isString()
-        .that((s) => options.includes(s), msg ?? `Expected one of [${options.join(", ")}]`), msg);
+        .that((s) => options.includes(s), msg ?? `Expected one of [${options.join(', ')}]`), msg);
 }
 /**
  * Assert a string equals the expected value, optionally ignoring whitespace.
@@ -1660,17 +1585,16 @@ export function assertStringEqualsIgnoreWhitespace(v, expected, ignoreAllWhitesp
     assuming(that(v)
         .isString()
         .that((s) => {
-        const norm = (x) => ignoreAllWhitespace ? x.replace(/\s+/g, "") : x.trim();
+        const norm = (x) => (ignoreAllWhitespace ? x.replace(/\s+/g, '') : x.trim());
         return norm(s) === norm(expected);
-    }, msg ??
-        `Expected string to equal (ignoring ${ignoreAllWhitespace ? "all whitespace" : "edges"})`), msg);
+    }, msg ?? `Expected string to equal (ignoring ${ignoreAllWhitespace ? 'all whitespace' : 'edges'})`), msg);
 }
 /** Assert the value is a Base64 string (basic RFC4648, non-URL-safe). */
 export function isBase64(v, msg) {
     const re = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
     assuming(that(v)
         .isString()
-        .that((s) => re.test(s), msg ?? "Expected Base64 string"), msg);
+        .that((s) => re.test(s), msg ?? 'Expected Base64 string'), msg);
 }
 // Alias for naming consistency with other assert* helpers
 export const assertIsBase64 = isBase64;
@@ -1758,7 +1682,7 @@ export function assertElementIsChildOf(el, parent, msg) {
         .isElement()
         .that((e) => {
         const elem = e;
-        if (typeof parent === "string") {
+        if (typeof parent === 'string') {
             return !!elem.closest(parent);
         }
         let cur = elem;
@@ -1768,7 +1692,7 @@ export function assertElementIsChildOf(el, parent, msg) {
             cur = cur.parentElement;
         }
         return false;
-    }, msg ?? "Expected element to be a descendant of parent"), msg);
+    }, msg ?? 'Expected element to be a descendant of parent'), msg);
 }
 // Themed aliases for targeted helpers
 export const assureStringNotEmpty = assertStringNotEmpty;
@@ -1818,13 +1742,13 @@ export const assureElementIsChildOf = assertElementIsChildOf;
 export function assertStringTrimmedNotEmpty(v, msg) {
     assuming(that(v)
         .isString()
-        .that((s) => s.trim().length > 0, msg ?? "Expected non-empty (trimmed)"), msg);
+        .that((s) => s.trim().length > 0, msg ?? 'Expected non-empty (trimmed)'), msg);
 }
 /** Assert an array has all unique items (===) */
 export function assertArrayUnique(v, msg) {
     assuming(that(v)
         .isArray()
-        .that((arr) => new Set(arr).size === arr.length, msg ?? "Expected array items to be unique"), msg);
+        .that((arr) => new Set(arr).size === arr.length, msg ?? 'Expected array items to be unique'), msg);
 }
 // ----------------------------------------------------------------------------
 // Value-returning "expect" helpers (assert + return the value)
@@ -2055,79 +1979,77 @@ export const mustBe = {
 };
 // A lightweight, non-exhaustive catalog of unary assertions.
 export const assertionsCatalog = [
-    { name: "isString", check: (v) => assertIsString(v), category: "string" },
+    { name: 'isString', check: (v) => assertIsString(v), category: 'string' },
     {
-        name: "stringNotEmpty",
+        name: 'stringNotEmpty',
         check: (v) => assertStringNotEmpty(v),
-        category: "string",
+        category: 'string',
     },
     {
-        name: "stringIsJSON",
+        name: 'stringIsJSON',
         check: (v) => assertStringIsJSON(v),
-        category: "string",
+        category: 'string',
     },
     {
-        name: "stringTrimmedNotEmpty",
+        name: 'stringTrimmedNotEmpty',
         check: (v) => assertStringTrimmedNotEmpty(v),
-        category: "string",
+        category: 'string',
     },
-    { name: "isNumber", check: (v) => assertIsNumber(v), category: "number" },
-    { name: "isArray", check: (v) => assertIsArray(v), category: "array" },
+    { name: 'isNumber', check: (v) => assertIsNumber(v), category: 'number' },
+    { name: 'isArray', check: (v) => assertIsArray(v), category: 'array' },
     {
-        name: "arrayNotEmpty",
+        name: 'arrayNotEmpty',
         check: (v) => assertArrayNotEmpty(v),
-        category: "array",
+        category: 'array',
     },
     {
-        name: "arrayEveryTruthy",
+        name: 'arrayEveryTruthy',
         check: (v) => assertArrayEveryTruthy(v),
-        category: "array",
+        category: 'array',
     },
     {
-        name: "arrayEveryFalsy",
+        name: 'arrayEveryFalsy',
         check: (v) => assertArrayEveryFalsy(v),
-        category: "array",
+        category: 'array',
     },
     {
-        name: "arrayOnlyStrings",
+        name: 'arrayOnlyStrings',
         check: (v) => assertArrayOnlyStrings(v),
-        category: "array",
+        category: 'array',
     },
     {
-        name: "arrayOnlyNumbers",
+        name: 'arrayOnlyNumbers',
         check: (v) => assertArrayOnlyNumbers(v),
-        category: "array",
+        category: 'array',
     },
     {
-        name: "arrayOnlyObjects",
+        name: 'arrayOnlyObjects',
         check: (v) => assertArrayOnlyObjects(v),
-        category: "array",
+        category: 'array',
     },
     {
-        name: "arrayUnique",
+        name: 'arrayUnique',
         check: (v) => assertArrayUnique(v),
-        category: "array",
+        category: 'array',
     },
-    { name: "isObject", check: (v) => assertIsObject(v), category: "object" },
+    { name: 'isObject', check: (v) => assertIsObject(v), category: 'object' },
     {
-        name: "objectAllKeysSet",
+        name: 'objectAllKeysSet',
         check: (v) => assertObjectAllKeysSet(v),
-        category: "object",
+        category: 'object',
     },
     {
-        name: "objectAnyKeyNull",
+        name: 'objectAnyKeyNull',
         check: (v) => assertObjectAnyKeyNull(v),
-        category: "object",
+        category: 'object',
     },
-    { name: "isBoolean", check: (v) => assertIsBoolean(v), category: "boolean" },
-    { name: "isDate", check: (v) => assertIsDate(v), category: "date" },
-    { name: "isElement", check: (v) => assertIsElement(v), category: "element" },
+    { name: 'isBoolean', check: (v) => assertIsBoolean(v), category: 'boolean' },
+    { name: 'isDate', check: (v) => assertIsDate(v), category: 'date' },
+    { name: 'isElement', check: (v) => assertIsElement(v), category: 'element' },
 ];
 /** Run catalog assertions on a value, optionally filtered by names or RegExp. */
 export function reportAssertions(v, filter) {
-    const entries = !filter || filter.length === 0
-        ? assertionsCatalog
-        : assertionsCatalog.filter((e) => filter.some((f) => typeof f === "string" ? e.name === f : f.test(e.name)));
+    const entries = !filter || filter.length === 0 ? assertionsCatalog : assertionsCatalog.filter((e) => filter.some((f) => (typeof f === 'string' ? e.name === f : f.test(e.name))));
     return entries.map((e) => {
         try {
             e.check(v);
@@ -2147,7 +2069,7 @@ export function report(v, filter) {
     return reportAssertions(v, filter);
 }
 function defaultLikeOptions(opts) {
-    const keys = opts?.keys ?? "subset";
+    const keys = opts?.keys ?? 'subset';
     return {
         keys,
         checkValues: opts?.checkValues ?? true,
@@ -2155,7 +2077,7 @@ function defaultLikeOptions(opts) {
         stringSimilarityThreshold: opts?.stringSimilarityThreshold ?? -1, // -1 means equality only
         trimStrings: opts?.trimStrings ?? true,
         caseInsensitiveStrings: opts?.caseInsensitiveStrings ?? false,
-        arrayOrderMatters: opts?.arrayOrderMatters ?? keys === "exact",
+        arrayOrderMatters: opts?.arrayOrderMatters ?? keys === 'exact',
         allowExtraArrayItems: opts?.allowExtraArrayItems ?? true,
     };
 }
@@ -2181,8 +2103,7 @@ function stringSimilarity(a, b) {
             const cost = a[i - 1] === b[j - 1] ? 0 : 1;
             dp[i][j] = Math.min(dp[i - 1][j] + 1, // deletion
             dp[i][j - 1] + 1, // insertion
-            dp[i - 1][j - 1] + cost // substitution
-            );
+            dp[i - 1][j - 1] + cost);
         }
     }
     const dist = dp[m][n];
@@ -2195,7 +2116,7 @@ function numbersClose(a, b, tol) {
     return Math.abs(a - b) <= tol;
 }
 function isPlainObject(x) {
-    return typeof x === "object" && x !== null && !Array.isArray(x);
+    return typeof x === 'object' && x !== null && !Array.isArray(x);
 }
 function likeArray(a, b, o) {
     // Quick length checks depending on policy
@@ -2235,7 +2156,7 @@ function likeArray(a, b, o) {
 function likeObject(a, b, o) {
     const aKeys = Object.keys(a);
     const bKeys = Object.keys(b);
-    if (o.keys === "exact") {
+    if (o.keys === 'exact') {
         if (aKeys.length !== bKeys.length)
             return false;
         for (const k of bKeys)
@@ -2269,16 +2190,16 @@ export function isLike(a, b, opts) {
     if (aIsDate || bIsDate) {
         const at = aIsDate ? a.getTime() : a;
         const bt = bIsDate ? b.getTime() : b;
-        if (typeof at !== "number" || typeof bt !== "number")
+        if (typeof at !== 'number' || typeof bt !== 'number')
             return false;
         return numbersClose(at, bt, o.numericTolerance);
     }
     // Numbers with tolerance
-    if (typeof a === "number" && typeof b === "number") {
+    if (typeof a === 'number' && typeof b === 'number') {
         return numbersClose(a, b, o.numericTolerance);
     }
     // Strings with optional similarity
-    if (typeof a === "string" && typeof b === "string") {
+    if (typeof a === 'string' && typeof b === 'string') {
         const aa = normalizeString(a, o);
         const bb = normalizeString(b, o);
         if (o.stringSimilarityThreshold >= 0) {
@@ -2287,7 +2208,7 @@ export function isLike(a, b, opts) {
         return aa === bb;
     }
     // Booleans strict
-    if (typeof a === "boolean" && typeof b === "boolean")
+    if (typeof a === 'boolean' && typeof b === 'boolean')
         return a === b;
     // Arrays
     if (Array.isArray(a) && Array.isArray(b))
@@ -2300,7 +2221,7 @@ export function isLike(a, b, opts) {
 }
 export function isAlotLike(a, b, opts) {
     const strict = {
-        keys: "exact",
+        keys: 'exact',
         checkValues: true,
         numericTolerance: 1e-9,
         stringSimilarityThreshold: 0.9,
@@ -2440,175 +2361,3 @@ export const assureAll = {
     // Element-targeted
     elementIsChildOf: sureElementIsChildOf,
 };
-// ============================================================================
-// LEGACY CHECKS SYSTEM (COMMENTED OUT - GOOD IDEAS BUT REPLACED BY CHAINS)
-// ============================================================================
-/*
-// LEGACY: Original imperative checks system
-// Good ideas: Type assertions, explicit function signatures
-// Replaced by: Fluent assume() chains which are more readable
-
-export type CoreChecksType = {
-  assumeTrue(cond: boolean, msg?: string): asserts cond;
-  assumeFalse(cond: boolean, msg?: string): asserts cond is false;
-  isTrue(cond: boolean, msg?: string): asserts cond;
-  isFalse(cond: boolean, msg?: string): asserts cond is false;
-  isFunction(v: unknown, msg?: string): asserts v is (...args: any[]) => any;
-  isPromise(v: unknown, msg?: string): asserts v is Promise<unknown>;
-  isInstanceOf<T>(v: unknown, ctor: new (...a: any[]) => T): asserts v is T;
-  
-  // Nullish helpers - these were good ideas
-  isNull(v: unknown, msg?: string): asserts v is null;
-  notNull<T>(v: T, msg?: string): asserts v is NonNullable<T>;
-  isUndefined(v: unknown, msg?: string): asserts v is undefined;
-  notUndefined<T>(v: T, msg?: string): asserts v is NonNullable<T>;
-  isNil(v: unknown, msg?: string): asserts v is null | undefined;
-  notNil<T>(v: T, msg?: string): asserts v is NonNullable<T>;
-  notNullOrUndefined<T>(v: T, msg?: string): asserts v is NonNullable<T>;
-};
-
-export type ObjectChecksType = {
-  isObject(v: unknown, msg?: string): asserts v is Record<string, unknown>;
-  hasKey<T extends object, K extends string>(obj: T, key: K, msg?: string): asserts obj is T & Record<K, unknown>;
-  hasKeys(...keys: string[]): AssumptionFn<Record<string, unknown>, 'object'>; // This was confused - mixing patterns
-  equalStringified(obj: unknown, expected: string): void;
-  sameKeys(obj: unknown, expected: Record<string, unknown>): void;
-  allKeysFalsey(obj: unknown): asserts obj is Record<string, null | undefined | false | 0 | ''>;
-  allKeysFalsy(obj: unknown): asserts obj is Record<string, null | undefined | false | 0 | ''>;
-  allKeysSet(obj: unknown): asserts obj is Record<string, unknown>;
-  anyKeyNull(obj: unknown): asserts obj is Record<string, null>;
-};
-
-export type ArrayChecksType = {
-  isArray(v: unknown, msg?: string): asserts v is unknown[];
-  hasLength<T extends unknown[]>(arr: T, len: number, msg?: string): asserts arr is { length: typeof len } & T;
-  containsString(arr: unknown[], index: number): asserts arr is { [K in typeof index]: string } & unknown[];
-  containsNumber(arr: unknown[], index: number): asserts arr is { [K in typeof index]: number } & unknown[];
-  containsObject(arr: unknown[], index: number): asserts arr is { [K in typeof index]: object } & unknown[];
-};
-
-export type ElementChecksType = {
-  isElement(v: unknown, msg?: string): asserts v is Element;
-  isHTMLElement(v: unknown, msg?: string): asserts v is HTMLElement;
-  isHidden(el: unknown, msg?: string): asserts el is Element;
-  isVisible(el: unknown, msg?: string): asserts el is Element;
-  hasChild(el: unknown, msg?: string): asserts el is Element;
-  hasChildMatching(el: unknown, selector: string): asserts el is Element;
-  hasDescendant(el: unknown, selector: string): asserts el is Element;
-  hasAttribute(el: unknown, name: string): asserts el is Element;
-  attributeEquals(el: unknown, name: string, expected: string): asserts el is Element;
-};
-
-// GOOD IDEAS FROM CHECKS:
-// 1. Explicit type assertions with `asserts` keyword
-// 2. Nullish checking variations (isNil, notNil, notNull, etc.)
-// 3. Element visibility checks (isHidden/isVisible)
-// 4. Promise and function type guards
-// 5. Strict type narrowing with generics
-
-// WHY REPLACED:
-// Old: Checks.isArray(value); Checks.hasLength(value, 5);
-// New: assume(value).isArray().hasLength(5)();
-// The new way is more readable and chainable
-*/
-// ============================================================================
-// BROKEN/INCOMPLETE IMPLEMENTATIONS (COMMENTED OUT - LEARN FROM MISTAKES)
-// ============================================================================
-/*
-// BROKEN: These were never properly implemented
-const CoreChecks: CoreChecksType = {
-  // ...
-  isTrue: function (cond: boolean, msg?: string): asserts cond {
-    throw new Error('Function not implemented.'); // ← Never finished!
-  },
-  isFalse: function (cond: boolean, msg?: string): asserts cond is false {
-    throw new Error(msg ?? 'Function not implemented.'); // ← Still broken!
-  },
-  // ...
-};
-
-// CONFUSED PATTERN: Mixing assumption chains with object methods
-const ObjectChecks: ObjectChecksType = {
-  // ...
-  hasKeys(...keys: string[]): AssumptionFn<Record<string, unknown>, 'object'> {
-    // This doesn't make sense - returning AssumptionFn from object method
-    return function (this: AssumptionFn<Record<string, unknown>, 'object'>) {
-      const obj = this.value(); // Wrong pattern - mixing contexts
-      for (const k of keys) {
-        if (!(k in obj)) throw new Error(`Expected object to have key "${k}"`);
-      }
-      return true;
-    } as AssumptionFn<Record<string, unknown>, 'object'>;
-  },
-  // ...
-};
-
-// LESSON LEARNED: Don't mix imperative and fluent APIs in same type system
-*/
-// ============================================================================
-// INTERESTING EXPERIMENTAL IDEAS (COMMENTED OUT - POTENTIAL FUTURE FEATURES)
-// ============================================================================
-/*
-// INTERESTING: Element visibility checking
-isHidden(el, msg) {
-  const e = el as Element;
-  const hiddenAttr = e.getAttribute?.('hidden') != null;
-  const computed = typeof window !== 'undefined' ? window.getComputedStyle(e) : null;
-  const hiddenByCss = computed ? computed.display === 'none' || computed.visibility === 'hidden' : false;
-  if (!hiddenAttr && !hiddenByCss) throw new Error(msg ?? 'Expected element to be hidden');
-},
-
-isVisible(el, msg) {
-  const e = el as Element;
-  const computed = typeof window !== 'undefined' ? window.getComputedStyle(e) : null;
-  const visible = computed ? computed.display !== 'none' && computed.visibility !== 'hidden' : true;
-  if (!visible) throw new Error(msg ?? 'Expected element to be visible');
-},
-
-// GOOD IDEA: Could add these to ElementOnlyChain
-// assume(element).isElement().isVisible().hasAttribute('data-id')
-
-// INTERESTING: Stringified equality checking
-equalStringified(obj, expected) {
-  if (JSON.stringify(obj) !== expected) throw new Error(`Expected object to equal stringified version`);
-},
-
-// GOOD IDEA: Could be useful for API response validation
-// assume(apiResponse).isObject().stringifiedEquals(expectedJson)
-
-// INTERESTING: Array type homogeneity checks
-onlyHasObjects(msg?: string) {
-  if (!(value as any[]).every((item) => typeof item === 'object' && item !== null && !Array.isArray(item)))
-    throw new Error(msg ?? 'Expected all objects');
-},
-
-onlyHasStrings(msg?: string) {
-  if (!(value as any[]).every((item) => typeof item === 'string'))
-    throw new Error(msg ?? 'Expected all strings');
-},
-
-// ALREADY IMPLEMENTED: These made it into ArrayOnlyChain - good ideas!
-*/
-// ============================================================================
-// REDUNDANT HELPER FUNCTIONS (COMMENTED OUT - ALREADY HAVE BETTER VERSIONS)
-// ============================================================================
-/*
-// REDUNDANT: These duplicate functionality in assume() chains
-export function assertIsString(v: unknown, msg?: string): asserts v is string {
-  assume(v).isString(msg)(); // Just use assume(v).isString()() directly
-}
-
-export function assertNotNil(v: unknown, msg?: string): asserts v is NonNullable<typeof v> {
-  if (v === undefined || v === null || typeof v === 'undefined')
-    throw new Error(msg ?? 'Entry is nil. Expected not null or undefined');
-  // Better: assume(v).notNil()()
-}
-
-export function assertIsObject<T extends object = Record<string, unknown>>(v: unknown, msg?: string): asserts v is T {
-  if (typeof v !== 'object' || v === null || Array.isArray(v))
-    throw new Error(msg ?? 'Expected object');
-  // Better: assume(v).isObject()()
-}
-
-// LESSON: Don't create wrapper functions for things that are already clean
-*/
